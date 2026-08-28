@@ -1,0 +1,120 @@
+name: Build-dev
+
+on:
+  push:
+    branches:
+      - 'dev'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-dev:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DASH_DIR: ./dashboard
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js 20 LTS
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: ${{ env.DASH_DIR }}/package-lock.json
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Hugo
+        uses: peaceiris/actions-hugo@v3
+        with:
+          hugo-version: '0.147.7'
+          extended: true
+
+      - name: Install dependencies
+        working-directory: ${{ env.DASH_DIR }}
+        run: npm ci
+
+      - name: Test dashboard
+        working-directory: ${{ env.DASH_DIR }}
+        run: npm test
+
+      - name: Lint dashboard
+        working-directory: ${{ env.DASH_DIR }}
+        run: npm run lint
+
+      - name: Build project
+        run: bash scripts/build_dashboard.sh
+
+      - name: Test Go
+        run: go test ./internal/app/admin ./internal/app/backup ./internal/app/migrations
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve image tags
+        id: image_tags
+        shell: bash
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tags="ghcr.io/rebeccapanel/rebecca:${GITHUB_REF_NAME}"
+          dockerhub_enabled=false
+          if [[ -n "${DOCKERHUB_USERNAME}" && -n "${DOCKERHUB_TOKEN}" ]]; then
+            dockerhub_enabled=true
+            tags="${tags}"$'\n'"rebeccapanel/rebecca:${GITHUB_REF_NAME}"
+          fi
+          echo "dockerhub_enabled=${dockerhub_enabled}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "tags<<EOF"
+            echo "${tags}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Login to Docker Hub
+        id: dockerhub_login
+        if: steps.image_tags.outputs.dockerhub_enabled == 'true'
+        continue-on-error: true
+        uses: docker/login-action@v4.5.2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Finalize image tags
+        id: final_image_tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          tags="ghcr.io/rebeccapanel/rebecca:${GITHUB_REF_NAME}"
+          if [[ "${{ steps.dockerhub_login.outcome }}" == "success" ]]; then
+            tags="${tags}"$'\n'"rebeccapanel/rebecca:${GITHUB_REF_NAME}"
+          fi
+          {
+            echo "tags<<EOF"
+            echo "${tags}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4.5.2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.final_image_tags.outputs.tags }}

@@ -1,0 +1,3 @@
+Goose SQL migrations live here when a schema change is better expressed as SQL.
+Most Rebecca migrations are expected to be registered as Go migrations so they
+can keep the legacy Alembic repair/backfill behavior across SQLite and MySQL.

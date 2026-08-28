@@ -1,0 +1,159 @@
+import {
+	Button,
+	HStack,
+	Switch,
+	Text,
+	useToast,
+} from "@chakra-ui/react";
+import { AppDialog } from "components/dialogs/AppDialog";
+import { DEFAULT_ADMIN_PERMISSIONS } from "constants/adminPermissions";
+import { useAdminsStore } from "contexts/AdminsContext";
+import { useEffect, useState } from "react";
+import useGetUser from "hooks/useGetUser";
+import { useTranslation } from "react-i18next";
+import type { Admin, AdminPermissions } from "types/Admin";
+import { AdminManagementPermission, AdminRole } from "types/Admin";
+import {
+	generateErrorMessage,
+	generateSuccessMessage,
+} from "utils/toastHandler";
+import AdminPermissionsEditor from "./AdminPermissionsEditor";
+
+type AdminPermissionsModalProps = {
+	isOpen: boolean;
+	onClose: () => void;
+	admin: Admin | null;
+};
+
+export const AdminPermissionsModal = ({
+	isOpen,
+	onClose,
+	admin,
+}: AdminPermissionsModalProps) => {
+	const { t } = useTranslation();
+	const toast = useToast();
+	const updateAdmin = useAdminsStore((state) => state.updateAdmin);
+	const { userData } = useGetUser();
+	const [permissionsDraft, setPermissionsDraft] = useState<AdminPermissions>(
+		admin?.permissions ?? DEFAULT_ADMIN_PERMISSIONS,
+	);
+	const [maxDataLimitValue, setMaxDataLimitValue] = useState<string>("");
+	const [saving, setSaving] = useState(false);
+	const [require2FA, setRequire2FA] = useState(false);
+	const isFullAccess = admin?.role === AdminRole.FullAccess;
+	const canManage2FA =
+		userData.role === AdminRole.FullAccess ||
+		Boolean(userData.permissions.admin_management[AdminManagementPermission.Manage2FA]);
+
+	useEffect(() => {
+		if (admin) {
+			setRequire2FA(Boolean(admin.require_2fa));
+			setPermissionsDraft(admin.permissions ?? DEFAULT_ADMIN_PERMISSIONS);
+			setMaxDataLimitValue(
+				admin.permissions.users.max_data_limit_per_user
+					? String(
+							Math.floor(
+								admin.permissions.users.max_data_limit_per_user /
+									(1024 * 1024 * 1024),
+							),
+						)
+					: "",
+			);
+		} else {
+			setRequire2FA(false);
+			setPermissionsDraft(DEFAULT_ADMIN_PERMISSIONS);
+			setMaxDataLimitValue("");
+		}
+	}, [admin]);
+
+	const handleSave = async () => {
+		if (!admin) return;
+		setSaving(true);
+		try {
+			await updateAdmin(admin.username, {
+				...(isFullAccess ? {} : { permissions: permissionsDraft }),
+				...(canManage2FA ? { require_2fa: require2FA } : {}),
+			});
+			generateSuccessMessage(
+				t("admins.permissions.updateSuccess"),
+				toast,
+			);
+			onClose();
+		} catch (error) {
+			generateErrorMessage(error, toast);
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	return (
+		<AppDialog
+			isOpen={isOpen}
+			onClose={onClose}
+			size="4xl"
+			title={t("admins.permissions.modalTitle", {
+				username: admin?.username ?? "",
+			})}
+			contentProps={{
+				maxW: { base: "100vw", md: "calc(100vw - 24px)", lg: "960px" },
+				h: { base: "100dvh", md: "auto" },
+				maxH: { base: "100dvh", md: "calc(100dvh - 7.5rem)" },
+				my: { base: 0, md: "3.75rem" },
+				borderRadius: { base: 0, md: "md" },
+			}}
+			headerProps={{ pr: 12, fontSize: { base: "xl", md: "2xl" } }}
+			bodyProps={{ overflowX: "hidden", overflowY: "auto" }}
+			footerProps={{ gap: 3 }}
+			footer={
+				<>
+					<Button variant="ghost" onClick={onClose}>
+						{t("cancel")}
+					</Button>
+					<Button
+						colorScheme="primary"
+						onClick={handleSave}
+						isLoading={saving}
+						isDisabled={!admin || (isFullAccess && !canManage2FA)}
+					>
+						{t("save")}
+					</Button>
+				</>
+			}
+		>
+					{isFullAccess && (
+						<Text color="gray.500" mb={3}>
+							{t("admins.permissions.fullAccessLocked")}
+						</Text>
+					)}
+					<AdminPermissionsEditor
+						value={permissionsDraft}
+						onChange={setPermissionsDraft}
+						showReset={!isFullAccess}
+						onReset={() => setPermissionsDraft(DEFAULT_ADMIN_PERMISSIONS)}
+						maxDataLimitValue={maxDataLimitValue}
+						onMaxDataLimitChange={(value) => {
+							setMaxDataLimitValue(value);
+							const parsed = Number(value);
+							setPermissionsDraft((prev) => ({
+								...prev,
+								users: {
+									...prev.users,
+									max_data_limit_per_user:
+										!value || Number.isNaN(parsed)
+											? null
+											: Math.max(0, parsed) * 1024 * 1024 * 1024,
+								},
+							}));
+						}}
+						hideExtendedSections={false}
+						isReadOnly={isFullAccess}
+					/>
+					<HStack borderWidth="1px" borderRadius="md" justify="space-between" mt={5} p={3}>
+						<Text>{t("admins.security.require2FA")}</Text>
+						<Switch isChecked={require2FA} isDisabled={!canManage2FA} onChange={(event) => setRequire2FA(event.target.checked)} />
+					</HStack>
+		</AppDialog>
+	);
+};
+
+export default AdminPermissionsModal;

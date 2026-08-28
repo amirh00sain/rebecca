@@ -1,0 +1,2013 @@
+import {
+	Box,
+	type BoxProps,
+	Button,
+	chakra,
+	Flex,
+	HStack,
+	IconButton,
+	Menu,
+	MenuButton,
+	MenuItem,
+	MenuList,
+	Portal,
+	Spinner,
+	Stack,
+	Text,
+	Tooltip,
+	useBreakpointValue,
+	useToast,
+	VStack,
+} from "@chakra-ui/react";
+import {
+	ArrowPathIcon,
+	CalendarDaysIcon,
+	ChartBarIcon,
+	CheckIcon,
+	ChevronRightIcon,
+	CircleStackIcon,
+	ClipboardIcon,
+	ClockIcon,
+	GlobeAltIcon,
+	LinkIcon,
+	NoSymbolIcon,
+	PencilIcon,
+	PlusCircleIcon,
+	QrCodeIcon,
+	ServerStackIcon,
+	SignalIcon,
+	TrashIcon,
+} from "@heroicons/react/24/outline";
+import { LockClosedIcon } from "@heroicons/react/24/solid";
+import type { SortingState } from "@tanstack/react-table";
+import { ReactComponent as AddFileIcon } from "assets/add_file.svg";
+import { resetStrategy } from "constants/UserSettings";
+import { useDashboard } from "contexts/DashboardContext";
+import dayjs from "dayjs";
+import useGetUser from "hooks/useGetUser";
+import {
+	type FC,
+	type ReactNode,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
+import { useTranslation } from "react-i18next";
+import { fetch } from "service/http";
+import { AdminRole, AdminStatus, UserPermissionToggle } from "types/Admin";
+import type { User, UserListItem } from "types/User";
+import {
+	canDeleteUserByTrafficCap,
+	canViewUserTraffic,
+	isUserManagementLocked,
+} from "utils/adminTraffic";
+import { copyTextToClipboard } from "utils/clipboard";
+import { formatBytes } from "utils/formatByte";
+import { generateUserLinks } from "utils/userLinks";
+import { AppDialog } from "./dialogs/AppDialog";
+import { ConfirmDialog, DeleteConfirmDialog } from "./dialogs/ConfirmDialog";
+import { OnlineStatus } from "./OnlineStatus";
+import { OperatorIdentity } from "./OperatorIdentity";
+import { StatusBadge } from "./StatusBadge";
+import {
+	DataTable,
+	type DataTableColumn,
+	type DataTableRowAction,
+	ResourceListCard,
+	type ResourceSummaryItem,
+	type RowActionItem,
+	RowActionsMenu,
+} from "./ui";
+import {
+	formatUsagePair,
+	UserAdminChip,
+	UserExpiryCountdown,
+	UserStatusDot,
+	UserUsageBar,
+} from "./users";
+
+const EmptySectionIcon = chakra(AddFileIcon);
+
+const iconProps = {
+	baseStyle: {
+		w: {
+			base: 4,
+			md: 5,
+		},
+		h: {
+			base: 4,
+			md: 5,
+		},
+	},
+};
+const CopyIcon = chakra(ClipboardIcon, iconProps);
+const SubscriptionLinkIcon = chakra(LinkIcon, iconProps);
+const QRIcon = chakra(QrCodeIcon, iconProps);
+const CopiedIcon = chakra(CheckIcon, iconProps);
+const EditIcon = chakra(PencilIcon, iconProps);
+const DeleteIcon = chakra(TrashIcon, {
+	baseStyle: {
+		width: "18px",
+		height: "18px",
+	},
+});
+const LockOverlayIcon = chakra(LockClosedIcon, {
+	baseStyle: {
+		width: {
+			base: 16,
+			md: 20,
+		},
+		height: {
+			base: 16,
+			md: 20,
+		},
+	},
+});
+const ResetIcon = chakra(ArrowPathIcon, iconProps);
+const RevokeIcon = chakra(NoSymbolIcon, iconProps);
+const TrafficIcon = chakra(PlusCircleIcon, iconProps);
+const ExtendIcon = chakra(ClockIcon, iconProps);
+const UsageHistoryIcon = chakra(ChartBarIcon, iconProps);
+const DataLimitIcon = chakra(CircleStackIcon, iconProps);
+const ExpiryIcon = chakra(CalendarDaysIcon, iconProps);
+const IPsIcon = chakra(GlobeAltIcon, iconProps);
+
+type UserIPRecord = {
+	node_id: number;
+	node_name?: string;
+	node_names?: string[];
+	protocol: string;
+	protocols?: string[];
+	inbound_tag?: string;
+	inbound_tags?: string[];
+	session_id?: string;
+	ip?: string;
+	assigned_ip?: string;
+	assigned_ips?: string[];
+	connections?: number;
+	operator_short_name?: string;
+	operator_owner?: string;
+	last_seen_at?: string;
+};
+
+type UserIPsResponse = {
+	username: string;
+	ips: UserIPRecord[];
+};
+
+const uniqueIPValues = (values: Array<string | undefined>) =>
+	Array.from(
+		new Set(values.map((value) => value?.trim()).filter(Boolean) as string[]),
+	).sort();
+
+const deduplicateUserIPRecords = (records: UserIPRecord[]) => {
+	const byIP = new Map<string, UserIPRecord>();
+	for (const record of records) {
+		const ip = (record.ip || record.assigned_ip || "").trim();
+		const key =
+			ip || `${record.node_id}:${record.protocol}:${record.session_id || ""}`;
+		const current = byIP.get(key);
+		if (!current) {
+			byIP.set(key, {
+				...record,
+				ip,
+				connections: Math.max(record.connections || 1, 1),
+				node_names: uniqueIPValues([
+					...(record.node_names || []),
+					record.node_name,
+				]),
+				protocols: uniqueIPValues([
+					...(record.protocols || []),
+					record.protocol,
+				]),
+				inbound_tags: uniqueIPValues([
+					...(record.inbound_tags || []),
+					record.inbound_tag,
+				]),
+				assigned_ips: uniqueIPValues([
+					...(record.assigned_ips || []),
+					record.assigned_ip,
+				]),
+			});
+			continue;
+		}
+		current.connections =
+			(current.connections || 1) + Math.max(record.connections || 1, 1);
+		current.node_names = uniqueIPValues([
+			...(current.node_names || []),
+			...(record.node_names || []),
+			record.node_name,
+		]);
+		current.protocols = uniqueIPValues([
+			...(current.protocols || []),
+			...(record.protocols || []),
+			record.protocol,
+		]);
+		current.inbound_tags = uniqueIPValues([
+			...(current.inbound_tags || []),
+			...(record.inbound_tags || []),
+			record.inbound_tag,
+		]);
+		current.assigned_ips = uniqueIPValues([
+			...(current.assigned_ips || []),
+			...(record.assigned_ips || []),
+			record.assigned_ip,
+		]);
+		if ((record.last_seen_at || "") > (current.last_seen_at || "")) {
+			current.last_seen_at = record.last_seen_at;
+		}
+		if (!current.operator_short_name) {
+			current.operator_short_name = record.operator_short_name;
+		}
+		if (!current.operator_owner) {
+			current.operator_owner = record.operator_owner;
+		}
+	}
+	return Array.from(byIP.values()).sort((left, right) =>
+		(right.last_seen_at || "").localeCompare(left.last_seen_at || ""),
+	);
+};
+
+const TRAFFIC_AMOUNTS = [1, 2, 3, 5, 10] as const;
+
+const TrafficSubmenu: FC<{
+	label: string;
+	isRTL: boolean;
+	activeAction: string | null;
+	onClose: () => void;
+	onSelect: (gigabytes: number) => void;
+	getOptionLabel: (gigabytes: number) => string;
+}> = ({ label, isRTL, activeAction, onClose, onSelect, getOptionLabel }) => {
+	const [isOpen, setIsOpen] = useState(false);
+	const closeTimer = useRef<number | null>(null);
+
+	const cancelClose = () => {
+		if (closeTimer.current !== null) {
+			window.clearTimeout(closeTimer.current);
+			closeTimer.current = null;
+		}
+	};
+	const openMenu = () => {
+		cancelClose();
+		setIsOpen(true);
+	};
+	const closeMenu = () => {
+		cancelClose();
+		setIsOpen(false);
+	};
+	const scheduleClose = () => {
+		cancelClose();
+		closeTimer.current = window.setTimeout(() => setIsOpen(false), 120);
+	};
+
+	useEffect(
+		() => () => {
+			if (closeTimer.current !== null) {
+				window.clearTimeout(closeTimer.current);
+			}
+		},
+		[],
+	);
+
+	return (
+		<Menu
+			isOpen={isOpen}
+			onClose={closeMenu}
+			placement={isRTL ? "left-start" : "right-start"}
+			strategy="fixed"
+			autoSelect={false}
+			closeOnSelect={false}
+			gutter={4}
+		>
+			<MenuButton
+				as={MenuItem}
+				icon={<TrafficIcon />}
+				isDisabled={activeAction?.startsWith("traffic-")}
+				closeOnSelect={false}
+				onMouseEnter={openMenu}
+				onMouseLeave={scheduleClose}
+				onClick={(event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					openMenu();
+				}}
+				onKeyDown={(event) => {
+					if (event.key === (isRTL ? "ArrowLeft" : "ArrowRight")) {
+						event.preventDefault();
+						event.stopPropagation();
+						openMenu();
+					}
+				}}
+			>
+				<HStack w="full" justify="space-between" spacing={3}>
+					<Text as="span" noOfLines={1}>
+						{label}
+					</Text>
+					<ChevronRightIcon
+						width={14}
+						style={{
+							flexShrink: 0,
+							transform: isRTL ? "rotate(180deg)" : undefined,
+						}}
+					/>
+				</HStack>
+			</MenuButton>
+			<Portal>
+				<MenuList
+					data-rb-context-menu=""
+					minW="152px"
+					maxH="min(70vh, 320px)"
+					overflowY="auto"
+					overflowX="hidden"
+					overscrollBehavior="contain"
+					borderRadius="lg"
+					boxShadow="2xl"
+					zIndex={2600}
+					onMouseEnter={openMenu}
+					onMouseLeave={scheduleClose}
+					onClick={(event) => event.stopPropagation()}
+				>
+					{TRAFFIC_AMOUNTS.map((gigabytes) => (
+						<MenuItem
+							key={gigabytes}
+							isDisabled={activeAction === `traffic-${gigabytes}`}
+							onClick={(event) => {
+								event.stopPropagation();
+								closeMenu();
+								onClose();
+								onSelect(gigabytes);
+							}}
+						>
+							{getOptionLabel(gigabytes)}
+						</MenuItem>
+					))}
+				</MenuList>
+			</Portal>
+		</Menu>
+	);
+};
+
+const getResetStrategy = (strategy: string): string => {
+	const entry = resetStrategy.find((item) => item.value === strategy);
+	return entry?.title ?? "No";
+};
+
+const formatCount = (value: number | null | undefined, locale: string) =>
+	new Intl.NumberFormat(locale || "en").format(value ?? 0);
+
+const formatUsernamePreview = (username: string, maxLength = 20) =>
+	username.length > maxLength
+		? `${username.slice(0, Math.max(4, maxLength - 4))}...`
+		: username;
+
+const MobileLifetimeDetail: FC<{
+	totalUsedTraffic: number;
+}> = ({ totalUsedTraffic }) => (
+	<Text
+		fontSize="sm"
+		fontWeight="semibold"
+		color="panel.text"
+		dir="ltr"
+		noOfLines={1}
+		sx={{ unicodeBidi: "isolate" }}
+	>
+		{formatBytes(totalUsedTraffic)}
+	</Text>
+);
+
+// Plain text on purpose: the expanded card sits right under the collapsed
+// row, which already shows the usage bar and percentage.
+const MobileUsageDetail: FC<{
+	used: number;
+	total: number | null;
+}> = ({ used, total }) => (
+	<Text
+		fontSize="sm"
+		fontWeight="semibold"
+		color="panel.text"
+		dir="ltr"
+		noOfLines={1}
+		sx={{ unicodeBidi: "isolate" }}
+	>
+		{formatUsagePair(used, total)}
+	</Text>
+);
+
+// Adapts the table's row-action descriptors into the shape the shared
+// RowActionsMenu ("...") expects, binding each callback to the given row.
+// Lets the desktop inline actions reuse the exact mobile overflow menu.
+const toMenuItems = (
+	actions: DataTableRowAction<UserListItem>[],
+	row: UserListItem,
+): RowActionItem[] =>
+	actions.map((action) => ({
+		id: action.id,
+		label: action.label,
+		icon: action.icon,
+		color: action.color,
+		isDanger: action.isDanger,
+		isDisabled:
+			typeof action.isDisabled === "function"
+				? action.isDisabled(row)
+				: action.isDisabled,
+		onClick: action.onClick ? () => action.onClick?.(row) : undefined,
+		render: action.render
+			? (onClose: () => void) => action.render?.(row, onClose)
+			: undefined,
+	}));
+
+const getUsageResetLabel = (
+	user: UserListItem,
+	t: (key: string) => string,
+): string | undefined => {
+	const isUnlimited = user.data_limit === 0 || user.data_limit === null;
+	if (
+		isUnlimited ||
+		!user.data_limit_reset_strategy ||
+		user.data_limit_reset_strategy === "no_reset"
+	) {
+		return undefined;
+	}
+	return t(
+		`userDialog.resetStrategy${getResetStrategy(user.data_limit_reset_strategy)}`,
+	);
+};
+
+type UsersTableProps = BoxProps & {
+	toolbar?: ReactNode;
+	/** Rendered in the header of the list summary card (e.g. refresh). */
+	headerActions?: ReactNode;
+};
+
+export const UsersTable: FC<UsersTableProps> = ({
+	toolbar,
+	headerActions,
+	...props
+}) => {
+	const {
+		filters,
+		users: usersResponse,
+		onEditingUser,
+		onFilterChange,
+		loading,
+		isUserLimitReached,
+		deleteUser,
+		resetDataUsage,
+		revokeSubscription,
+		refetchUsers,
+		setQRCode,
+		setSubLink,
+		linkTemplates,
+	} = useDashboard();
+
+	const { t, i18n } = useTranslation();
+	const isRTL = i18n.dir(i18n.language) === "rtl";
+	const locale = i18n.language || "en";
+	const toast = useToast();
+	// One toast shape for every action in this section: top entrance, closable.
+	const notify = useCallback(
+		(
+			title: string,
+			status: "success" | "error",
+			options?: { description?: string; duration?: number },
+		) =>
+			toast({
+				title,
+				status,
+				description: options?.description,
+				duration: options?.duration ?? 2500,
+				isClosable: true,
+				position: "top",
+			}),
+		[toast],
+	);
+	const { userData } = useGetUser();
+	const hasPrivilegedRole =
+		userData.role === AdminRole.Sudo || userData.role === AdminRole.FullAccess;
+	const hasFullAccess = userData.role === AdminRole.FullAccess;
+	const userManagementLocked = isUserManagementLocked(userData);
+	const canViewTraffic = canViewUserTraffic(userData);
+	const isAdminDisabled = Boolean(
+		!hasPrivilegedRole && userData.status === AdminStatus.Disabled,
+	);
+	const canCreateUsers =
+		hasFullAccess ||
+		Boolean(userData.permissions?.users?.[UserPermissionToggle.Create]);
+	const canDeleteUsers =
+		hasFullAccess ||
+		Boolean(userData.permissions?.users?.[UserPermissionToggle.Delete]);
+	const canResetUsage =
+		hasFullAccess ||
+		Boolean(userData.permissions?.users?.[UserPermissionToggle.ResetUsage]);
+	const canRevokeSub =
+		hasFullAccess ||
+		Boolean(userData.permissions?.users?.[UserPermissionToggle.Revoke]);
+	const canOpenUserDialog =
+		!isAdminDisabled && (canCreateUsers || hasFullAccess);
+	const canToggleUserStatus =
+		!isAdminDisabled &&
+		(canCreateUsers || hasFullAccess || userManagementLocked);
+	const canMutateUsers =
+		!isAdminDisabled && canCreateUsers && !userManagementLocked;
+	const canDeleteUserActions = !isAdminDisabled && canDeleteUsers;
+	const canResetUsageActions =
+		!isAdminDisabled &&
+		canResetUsage &&
+		canViewTraffic &&
+		!userManagementLocked;
+	const canRevokeSubActions =
+		!isAdminDisabled && canRevokeSub && !userManagementLocked;
+	const disabledReason = userData.disabled_reason;
+
+	const rowsToRender = filters.limit || 10;
+	const isFiltered = usersResponse.users.length !== usersResponse.total;
+	// Matches DataTable's own mobile/desktop threshold (mobileBreakpoint
+	// defaults to "lg") so the two-row detailed usage layout applies at
+	// every genuine desktop width, while the mobile card's collapsed-row
+	// summary (which reuses this same cell) keeps its original compact form.
+	const isDesktopUsageLayout =
+		useBreakpointValue({ base: false, lg: true }) ?? false;
+	const hasUsageScopeFilter = Boolean(
+		filters.search?.trim() ||
+			filters.status ||
+			(filters.advancedFilters && filters.advancedFilters.length > 0) ||
+			filters.owner ||
+			filters.serviceId,
+	);
+	const [contextAction, setContextAction] = useState<string | null>(null);
+	const [selectedUsernames, setSelectedUsernames] = useState<string[]>([]);
+	const [bulkAction, setBulkAction] = useState<string | null>(null);
+	const [isBulkResetOpen, setIsBulkResetOpen] = useState(false);
+	const [ipDialog, setIPDialog] = useState<{
+		username: string;
+		records: UserIPRecord[];
+		error?: string;
+	} | null>(null);
+
+	const visibleUsernames = useMemo(
+		() => usersResponse.users.map((user) => user.username),
+		[usersResponse.users],
+	);
+	const visibleUsernameSet = useMemo(
+		() => new Set(visibleUsernames),
+		[visibleUsernames],
+	);
+	const selectedUsernameSet = useMemo(
+		() => new Set(selectedUsernames),
+		[selectedUsernames],
+	);
+	const selectedUsers = useMemo(
+		() =>
+			usersResponse.users.filter((user) =>
+				selectedUsernameSet.has(user.username),
+			),
+		[usersResponse.users, selectedUsernameSet],
+	);
+
+	useEffect(() => {
+		setSelectedUsernames((prev) =>
+			prev.filter((username) => visibleUsernameSet.has(username)),
+		);
+	}, [visibleUsernameSet]);
+
+	const clearSelectedUsers = () => setSelectedUsernames([]);
+
+	const statusBreakdown = useMemo(() => {
+		if (usersResponse.status_breakdown) {
+			return usersResponse.status_breakdown;
+		}
+		const summary: Record<string, number> = {};
+		usersResponse.users.forEach((user) => {
+			summary[user.status] = (summary[user.status] ?? 0) + 1;
+		});
+		return summary;
+	}, [usersResponse.status_breakdown, usersResponse.users]);
+
+	const handleSort = (column: string) => {
+		let newSort = filters.sort;
+		if (newSort.includes(column)) {
+			if (newSort.startsWith("-")) {
+				newSort = "-created_at";
+			} else {
+				newSort = `-${column}`;
+			}
+		} else {
+			newSort = column;
+		}
+		onFilterChange({
+			sort: newSort,
+			offset: 0,
+		});
+	};
+
+	const closeContextMenu = useCallback(() => undefined, []);
+
+	const handleResetUsage = (user: UserListItem) => {
+		useDashboard.setState({ resetUsageUser: user });
+		closeContextMenu();
+	};
+
+	const handleRevokeSub = async (user: UserListItem) => {
+		setContextAction("revoke");
+		try {
+			await revokeSubscription(user);
+			notify(t("usersTable.revokeSub"), "success");
+		} catch (error: any) {
+			notify(error?.data?.detail || error?.message || t("error"), "error");
+		} finally {
+			setContextAction(null);
+			closeContextMenu();
+		}
+	};
+
+	const handleAdjustTraffic = async (user: UserListItem, gigabytes: number) => {
+		const currentLimit = user.data_limit;
+		if (!currentLimit || currentLimit <= 0) {
+			return;
+		}
+		setContextAction(`traffic-${gigabytes}`);
+		try {
+			const delta = gigabytes * 1024 * 1024 * 1024;
+			const nextLimit = currentLimit + delta;
+			await fetch(`/v2/users/${encodeURIComponent(user.username)}`, {
+				method: "PUT",
+				body: { data_limit: nextLimit },
+			});
+			notify(t("usersTable.addTrafficSuccess"), "success");
+			refetchUsers(true);
+		} catch (error: any) {
+			notify(error?.data?.detail || error?.message || t("error"), "error");
+		} finally {
+			setContextAction(null);
+			closeContextMenu();
+		}
+	};
+
+	const handleExtendExpire = async (user: UserListItem, days: number) => {
+		if (user.expire === null || user.expire === 0 || user.expire === undefined)
+			return;
+		setContextAction("expire");
+		try {
+			const secondsToAdd = days * 86400;
+			const nextExpire = Math.floor(user.expire + secondsToAdd);
+			await fetch(`/v2/users/${encodeURIComponent(user.username)}`, {
+				method: "PUT",
+				body: { expire: nextExpire },
+			});
+			notify(
+				t("usersTable.extendExpireSuccess"),
+				"success",
+			);
+			refetchUsers(true);
+		} catch (error: any) {
+			notify(error?.data?.detail || error?.message || t("error"), "error");
+		} finally {
+			setContextAction(null);
+			closeContextMenu();
+		}
+	};
+
+	const handleDisableUser = async (user: UserListItem) => {
+		if (!canToggleUserStatus || user.status === "disabled") return;
+		setContextAction("disable");
+		try {
+			await fetch(`/v2/users/${encodeURIComponent(user.username)}`, {
+				method: "PUT",
+				body: { status: "disabled" },
+			});
+			notify(t("usersTable.disableUser"), "success");
+			refetchUsers(true);
+		} catch (error: any) {
+			notify(error?.data?.detail || error?.message || t("error"), "error");
+		} finally {
+			setContextAction(null);
+			closeContextMenu();
+		}
+	};
+
+	const handleEnableUser = async (user: UserListItem) => {
+		if (!canToggleUserStatus || user.status !== "disabled") return;
+		setContextAction("enable");
+		try {
+			await fetch(`/v2/users/${encodeURIComponent(user.username)}`, {
+				method: "PUT",
+				body: { status: "active" },
+			});
+			notify(t("usersTable.enableUser"), "success");
+			refetchUsers(true);
+		} catch (error: any) {
+			notify(error?.data?.detail || error?.message || t("error"), "error");
+		} finally {
+			setContextAction(null);
+			closeContextMenu();
+		}
+	};
+
+	const formatUserIPRecords = (records: UserIPRecord[]) => {
+		if (records.length === 0) {
+			return t("usersTable.noOnlineIps");
+		}
+		return records
+			.map((record) => {
+				const nodes = uniqueIPValues([
+					...(record.node_names || []),
+					record.node_name || `node-${record.node_id}`,
+				]);
+				const protocols = uniqueIPValues([
+					...(record.protocols || []),
+					record.protocol,
+				]);
+				const inbounds = uniqueIPValues([
+					...(record.inbound_tags || []),
+					record.inbound_tag,
+				]);
+				const ip = record.ip || record.assigned_ip || "-";
+				const assigned = uniqueIPValues([
+					...(record.assigned_ips || []),
+					record.assigned_ip,
+				]).filter((value) => value !== ip);
+				const operator = record.operator_short_name || record.operator_owner;
+				return `${protocols.join(", ")}${inbounds.length ? ` (${inbounds.join(", ")})` : ""} @ ${nodes.join(", ")}: ${ip}${assigned.length ? ` assigned=${assigned.join(",")}` : ""}${operator ? ` operator=${operator}` : ""}`;
+			})
+			.join("\n");
+	};
+
+	const handleGetIPs = async (user: UserListItem) => {
+		setContextAction("ips");
+		setIPDialog({ username: user.username, records: [] });
+		closeContextMenu();
+		try {
+			const response = await fetch<UserIPsResponse>(
+				`/user/${encodeURIComponent(user.username)}/ips`,
+			);
+			setIPDialog((current) =>
+				current?.username === user.username
+					? {
+							username: user.username,
+							records: deduplicateUserIPRecords(response.ips || []),
+						}
+					: current,
+			);
+		} catch (error: any) {
+			const message =
+				error?.data?.detail ||
+				error?.message ||
+				t("usersTable.getIpsFailed");
+			setIPDialog((current) =>
+				current?.username === user.username
+					? { ...current, error: message }
+					: current,
+			);
+		} finally {
+			setContextAction(null);
+		}
+	};
+
+	const handleCopyIPs = async () => {
+		if (!ipDialog?.records.length) return;
+		try {
+			await copyTextToClipboard(formatUserIPRecords(ipDialog.records));
+			notify(t("usersTable.ipsCopied"), "success", {
+				duration: 1200,
+			});
+		} catch {
+			notify(t("usersTable.copyFailed"), "error", {
+				duration: 1600,
+			});
+		}
+	};
+
+	const handleDeleteUser = useCallback(
+		async (user: UserListItem) => {
+			setContextAction("delete");
+			try {
+				await deleteUser(user);
+				notify(
+					t("deleteUser.deleteSuccess", { username: user.username }),
+					"success",
+					{ duration: 3000 },
+				);
+				refetchUsers(true);
+			} catch (error: any) {
+				notify(error?.data?.detail || error?.message || t("error"), "error");
+			} finally {
+				setContextAction(null);
+				closeContextMenu();
+			}
+		},
+		[closeContextMenu, deleteUser, notify, refetchUsers, t],
+	);
+
+	const runBulkUserAction = async (
+		action: string,
+		users: UserListItem[],
+		handler: (user: UserListItem) => Promise<unknown>,
+		successLabel: string,
+	) => {
+		if (!users.length || bulkAction) return;
+		setBulkAction(action);
+		try {
+			await Promise.all(users.map((user) => handler(user)));
+			notify(successLabel, "success", {
+				description: t("usersTable.bulkActionCount", {
+						count: users.length,
+					}),
+			});
+			clearSelectedUsers();
+			refetchUsers(true);
+		} catch (error: any) {
+			notify(error?.data?.detail || error?.message || t("error"), "error");
+		} finally {
+			setBulkAction(null);
+		}
+	};
+
+	const bulkDisableTargets = selectedUsers.filter(
+		(user) => user.status !== "disabled",
+	);
+	const bulkEnableTargets = selectedUsers.filter(
+		(user) => user.status === "disabled",
+	);
+	const bulkDeleteTargets = selectedUsers.filter((user) =>
+		canDeleteUserByTrafficCap(userData, user),
+	);
+
+	const handleBulkDisable = () =>
+		runBulkUserAction(
+			"disable",
+			bulkDisableTargets,
+			(user) =>
+				fetch(`/v2/users/${encodeURIComponent(user.username)}`, {
+					method: "PUT",
+					body: { status: "disabled" },
+				}),
+			t("usersTable.disableUser"),
+		);
+
+	const handleBulkEnable = () =>
+		runBulkUserAction(
+			"enable",
+			bulkEnableTargets,
+			(user) =>
+				fetch(`/v2/users/${encodeURIComponent(user.username)}`, {
+					method: "PUT",
+					body: { status: "active" },
+				}),
+			t("usersTable.enableUser"),
+		);
+
+	const handleBulkReset = async () => {
+		await runBulkUserAction(
+			"reset",
+			selectedUsers,
+			(user) => resetDataUsage(user),
+			t("usersTable.resetUsage"),
+		);
+		setIsBulkResetOpen(false);
+	};
+
+	const handleBulkRevoke = () =>
+		runBulkUserAction(
+			"revoke",
+			selectedUsers,
+			(user) => revokeSubscription(user),
+			t("usersTable.revokeSub"),
+		);
+
+	const handleBulkDelete = () =>
+		runBulkUserAction(
+			"delete",
+			bulkDeleteTargets,
+			(user) => deleteUser(user),
+			t("deleteUser.title"),
+		);
+
+	const userColumns = useMemo<DataTableColumn<UserListItem>[]>(() => {
+		const columns: DataTableColumn<UserListItem>[] = [
+			{
+				id: "username",
+				header: t("username"),
+				accessor: "username",
+				sortable: true,
+				isPrimary: true,
+				priority: "primary",
+				width: { lg: "150px", xl: "168px" },
+				minWidth: "148px",
+				maxWidth: "188px",
+				truncate: true,
+				tooltip: true,
+				multiline: true,
+				cellAlign: "start",
+				headerInset: "20px",
+				mobilePriority: 0,
+				mobileMetaLabel: t("username"),
+				cell: (user) => (
+					<HStack
+						spacing={2.5}
+						align="center"
+						dir="ltr"
+						flexDirection="row"
+						justify="flex-start"
+						minW={0}
+						maxW="full"
+						w="full"
+					>
+						<UserStatusDot lastOnline={user.online_at ?? null} />
+						<Box
+							minW={0}
+							flex="1 1 auto"
+							maxW="full"
+							py={0.5}
+							lineHeight="short"
+							textAlign="left"
+							overflow="hidden"
+						>
+							<Text
+								fontWeight="semibold"
+								noOfLines={1}
+								maxW="full"
+								color="panel.text"
+								dir="ltr"
+								sx={{ unicodeBidi: "isolate" }}
+								_hover={
+									canOpenUserDialog ? { color: "panel.accent" } : undefined
+								}
+							>
+								{formatUsernamePreview(user.username)}
+							</Text>
+							<HStack
+								className="rb-user-username-meta"
+								spacing={1.5}
+								minW={0}
+								maxW="full"
+								overflow="hidden"
+							>
+								<UserAdminChip
+									show={hasPrivilegedRole}
+									adminUsername={user.admin_username}
+								/>
+								<OnlineStatus
+									lastOnline={user.online_at ?? null}
+									withMargin={false}
+									compact
+								/>
+							</HStack>
+						</Box>
+					</HStack>
+				),
+			},
+			{
+				id: "expire",
+				header: t("usersTable.status"),
+				sortable: true,
+				priority: "high",
+				width: { lg: "128px", xl: "138px" },
+				minWidth: "112px",
+				maxWidth: "148px",
+				headerAlign: "center",
+				cellAlign: "start",
+				headerInset: "16px",
+				mobilePriority: 1,
+				mobileMetaLabel: t("usersTable.status"),
+				mobileDetailCell: (user) => (
+					<StatusBadge expiryDate={null} status={user.status} compact />
+				),
+				cell: (user) => (
+					<Flex align="center" justify="flex-start" dir="ltr" w="full">
+						<StatusBadge
+							expiryDate={user.expire}
+							status={user.status}
+							compact
+							detailPlacement="inline"
+						/>
+					</Flex>
+				),
+			},
+			{
+				id: "expiry",
+				header: t("usersTable.expire"),
+				desktopVisible: false,
+				mobileVisible: true,
+				mobilePriority: 2,
+				mobileMetaLabel: t("usersTable.expire"),
+				cell: (user) => <UserExpiryCountdown expire={user.expire} />,
+			},
+			{
+				id: "service",
+				header: t("usersTable.service"),
+				accessor: (user) =>
+					user.service_name ?? t("usersTable.defaultService"),
+				priority: "medium",
+				hideBelow: "xl",
+				width: "118px",
+				minWidth: "96px",
+				maxWidth: "138px",
+				truncate: true,
+				tooltip: true,
+				mobilePriority: 3,
+				mobileVisible: true,
+				mobileMetaLabel: t("usersTable.service"),
+				cell: (user) => (
+					<Text
+						fontSize="sm"
+						color={user.service_name ? "panel.text" : "panel.textMuted"}
+						noOfLines={1}
+						maxW="full"
+					>
+						{user.service_name ?? t("usersTable.defaultService")}
+					</Text>
+				),
+			},
+		];
+
+		if (canViewTraffic) {
+			columns.push({
+				id: "used_traffic",
+				header: t("usersTable.dataUsage"),
+				sortable: true,
+				priority: "high",
+				hideBelow: "lg",
+				width: "clamp(104px, 16vw, 240px)",
+				minWidth: "104px",
+				maxWidth: "240px",
+				headerAlign: "center",
+				cellAlign: "start",
+				mobileVisible: true,
+				mobileSummary: true,
+				mobilePriority: 4,
+				mobileMetaLabel: t("usersTable.dataUsage"),
+				mobileDetailCell: (user) => (
+					<MobileUsageDetail used={user.used_traffic} total={user.data_limit} />
+				),
+				cell: (user) =>
+					isDesktopUsageLayout ? (
+						<UserUsageBar
+							variant="detailed"
+							used={user.used_traffic}
+							total={user.data_limit}
+							lifetimeUsed={user.lifetime_used_traffic}
+							lifetimeLabel={t("usersTable.lifetimeUsage")}
+							resetLabel={getUsageResetLabel(user, t)}
+						/>
+					) : (
+						<UserUsageBar used={user.used_traffic} total={user.data_limit} />
+					),
+			});
+			columns.push({
+				id: "lifetime_used_traffic",
+				header: t("usersTable.lifetimeUsage"),
+				desktopVisible: false,
+				mobileVisible: true,
+				mobilePriority: 5,
+				mobileMetaLabel: t("usersTable.lifetimeUsage"),
+				cell: (user) => (
+					<MobileLifetimeDetail totalUsedTraffic={user.lifetime_used_traffic} />
+				),
+			});
+		}
+
+		// The reseller tag is hidden in the collapsed mobile row (CSS) and
+		// surfaces here instead, inside the expanded details.
+		if (hasPrivilegedRole) {
+			columns.push({
+				id: "admin",
+				header: t("usersTable.admin"),
+				desktopVisible: false,
+				mobileVisible: true,
+				mobilePriority: 6,
+				mobileMetaLabel: t("usersTable.admin"),
+				cell: (user) => <UserAdminChip adminUsername={user.admin_username} />,
+			});
+		}
+
+		return columns;
+	}, [
+		canOpenUserDialog,
+		canViewTraffic,
+		hasPrivilegedRole,
+		isDesktopUsageLayout,
+		t,
+	]);
+
+	const userSorting = useMemo<SortingState>(() => {
+		const currentSort = filters.sort || "";
+		const desc = currentSort.startsWith("-");
+		const id = desc ? currentSort.slice(1) : currentSort;
+		if (!id) return [];
+		return [{ id, desc }];
+	}, [filters.sort]);
+
+	const handleUserTableSorting = (nextSorting: SortingState) => {
+		const next = nextSorting[0];
+		if (!next) return;
+		handleSort(next.id);
+	};
+
+	const formatUserLink = (link?: string | null) => {
+		if (!link) return "";
+		return link.startsWith("/") ? window.location.origin + link : link;
+	};
+
+	const copyUserText = async (text: string, successLabel: string) => {
+		if (!text) return false;
+		try {
+			await copyTextToClipboard(text);
+			notify(successLabel, "success", { duration: 1200 });
+			return true;
+		} catch {
+			notify(t("usersTable.copyFailed"), "error", {
+				duration: 1600,
+			});
+			return false;
+		}
+	};
+
+	const getUserRowActions = (
+		user: UserListItem,
+	): DataTableRowAction<UserListItem>[] => {
+		const subscriptionLink = formatUserLink(user.subscription_url);
+		const configLinks = generateUserLinks(user, linkTemplates);
+		const configLinksText = configLinks.join("\n");
+		const actions: DataTableRowAction<UserListItem>[] = [
+			{
+				id: "copy-subscription",
+				label: t("usersTable.copyLink"),
+				icon: <SubscriptionLinkIcon />,
+				isDisabled: !subscriptionLink,
+				onClick: () =>
+					copyUserText(subscriptionLink, t("copied")),
+			},
+			{
+				id: "copy-configs",
+				label: t("usersTable.copyConfigs"),
+				icon: <CopyIcon />,
+				isDisabled: configLinks.length === 0,
+				onClick: () =>
+					copyUserText(configLinksText, t("copied")),
+			},
+			{
+				id: "qr",
+				label: t("usersTable.qrCode"),
+				icon: <QRIcon />,
+				onClick: () => {
+					setQRCode(configLinks, user.username);
+					setSubLink(subscriptionLink);
+				},
+			},
+			{
+				id: "get-ips",
+				label: t("usersTable.getIps"),
+				icon: <IPsIcon />,
+				isDisabled: contextAction === "ips",
+				onClick: () => handleGetIPs(user),
+			},
+		];
+
+		if (canOpenUserDialog) {
+			actions.push({
+				id: "edit",
+				label: t("userDialog.editUser"),
+				icon: <EditIcon />,
+				onClick: () => onEditingUser(user),
+			});
+		}
+
+		// Reuses the edit dialog's existing Usage tab (chart + /user/{u}/usage).
+		if (canViewTraffic) {
+			actions.push({
+				id: "usage-history",
+				label: t("usersTable.usageHistory"),
+				icon: <UsageHistoryIcon />,
+				onClick: () => onEditingUser(user, 1),
+			});
+		}
+
+		if (canToggleUserStatus && user.status !== "disabled") {
+			actions.push({
+				id: "disable",
+				label: t("usersTable.disableUser"),
+				icon: <RevokeIcon />,
+				isDisabled: contextAction === "disable",
+				onClick: () => handleDisableUser(user),
+			});
+		}
+
+		if (canToggleUserStatus && user.status === "disabled") {
+			actions.push({
+				id: "enable",
+				label: t("usersTable.enableUser"),
+				icon: <CheckIcon width={16} />,
+				isDisabled: contextAction === "enable",
+				onClick: () => handleEnableUser(user),
+			});
+		}
+
+		if (canResetUsageActions) {
+			actions.push({
+				id: "reset",
+				label: t("usersTable.resetUsage"),
+				icon: <ResetIcon />,
+				isDisabled: contextAction === "reset",
+				onClick: () => handleResetUsage(user),
+			});
+		}
+
+		if (canRevokeSubActions) {
+			actions.push({
+				id: "revoke",
+				label: t("usersTable.revokeSub"),
+				icon: <RevokeIcon />,
+				isDisabled: contextAction === "revoke",
+				onClick: () => handleRevokeSub(user),
+			});
+		}
+
+		if (canMutateUsers && user.data_limit !== null && user.data_limit !== 0) {
+			actions.push({
+				id: "add-traffic",
+				label: t("services.userActions.traffic.add"),
+				icon: <TrafficIcon />,
+				render: (_row, onClose) => (
+					<TrafficSubmenu
+						label={t("services.userActions.traffic.add")}
+						isRTL={isRTL}
+						activeAction={contextAction}
+						onClose={onClose}
+						onSelect={(gigabytes) => handleAdjustTraffic(user, gigabytes)}
+						getOptionLabel={(gigabytes) =>
+							t("usersTable.addGb", {
+								count: gigabytes,
+							})
+						}
+					/>
+				),
+			});
+		}
+
+		// Absolute data-limit editor (PUT data_limit) — complements the
+		// relative "Add traffic" action above.
+		if (canMutateUsers) {
+			actions.push({
+				id: "set-data-limit",
+				label: t("usersTable.setDataLimit"),
+				icon: <DataLimitIcon />,
+				onClick: () =>
+					useDashboard.setState({
+						quickEditUser: { user, field: "data_limit" },
+					}),
+			});
+		}
+
+		if (
+			canMutateUsers &&
+			user.expire !== null &&
+			user.expire !== 0 &&
+			user.expire !== undefined
+		) {
+			actions.push({
+				id: "extend-expire",
+				label: t("usersTable.add30Days"),
+				icon: <ExtendIcon />,
+				isDisabled: contextAction === "expire",
+				onClick: () => handleExtendExpire(user, 30),
+			});
+		}
+
+		// Absolute expiry editor (PUT expire) — complements "Add 30 days".
+		if (canMutateUsers) {
+			actions.push({
+				id: "set-expiry",
+				label: t("usersTable.setExpiry"),
+				icon: <ExpiryIcon />,
+				onClick: () =>
+					useDashboard.setState({
+						quickEditUser: { user, field: "expire" },
+					}),
+			});
+		}
+
+		if (canDeleteUserActions && canDeleteUserByTrafficCap(userData, user)) {
+			actions.push({
+				id: "delete",
+				label: t("deleteUser.title"),
+				icon: <DeleteIcon />,
+				isDanger: true,
+				render: (_row, onClose) => (
+					<DeleteConfirmDialog
+						description={t("deleteUser.prompt", { username: user.username })}
+						onConfirm={async () => {
+							onClose();
+							await handleDeleteUser(user);
+						}}
+					>
+						<MenuItem
+							icon={<DeleteIcon />}
+							color="red.400"
+							onClick={(event) => event.stopPropagation()}
+						>
+							{t("deleteUser.title")}
+						</MenuItem>
+					</DeleteConfirmDialog>
+				),
+			});
+		}
+
+		return actions;
+	};
+
+	const filteredUsageTotal = usersResponse.usage_total ?? null;
+	const activeUsersCount =
+		statusBreakdown.active ?? usersResponse.active_total ?? 0;
+	const summaryItems: ResourceSummaryItem[] = [
+		{
+			label: t("usersTable.total"),
+			value: formatCount(usersResponse.total, locale),
+			colorScheme: isUserLimitReached ? "red" : "gray",
+		},
+		{
+			label: t("status.active"),
+			value: formatCount(activeUsersCount, locale),
+			colorScheme: "green",
+		},
+		{
+			label: t("status.on_hold"),
+			value: formatCount(statusBreakdown.on_hold ?? 0, locale),
+			colorScheme: "orange",
+		},
+		{
+			label: t("status.limited"),
+			value: formatCount(statusBreakdown.limited ?? 0, locale),
+			colorScheme: "yellow",
+		},
+		{
+			label: t("status.expired"),
+			value: formatCount(statusBreakdown.expired ?? 0, locale),
+			colorScheme: "red",
+		},
+		{
+			label: t("onlineStatus.online"),
+			value: formatCount(usersResponse.online_total ?? 0, locale),
+			colorScheme: "teal",
+		},
+	];
+
+	const usageForSummary = canViewTraffic ? filteredUsageTotal : null;
+
+	if (usageForSummary !== null) {
+		summaryItems.push({
+			label: hasUsageScopeFilter
+				? t("usersTable.filteredUsage")
+				: t("usersTable.listUsage"),
+			value: formatBytes(usageForSummary),
+			colorScheme: "blue",
+			helper: hasUsageScopeFilter
+				? t("usersTable.filteredUsageHelper")
+				: t("usersTable.listUsageHelper"),
+		});
+	}
+
+	return (
+		<VStack
+			spacing={4}
+			align="stretch"
+			dir={isRTL ? "rtl" : "ltr"}
+			data-dir={isRTL ? "rtl" : "ltr"}
+			pb={selectedUsers.length > 0 ? { base: 32, md: 24 } : 0}
+			{...props}
+		>
+			{/* One unified header card: stats on top, search + quick filters below. */}
+			<ResourceListCard
+				title={t("usersTable.listHeader")}
+				summaryItems={summaryItems}
+				actions={headerActions}
+			>
+				{toolbar}
+			</ResourceListCard>
+
+			<Box position="relative">
+				<Stack
+					spacing={3}
+					filter={isAdminDisabled ? "blur(4px)" : undefined}
+					pointerEvents={isAdminDisabled ? "none" : undefined}
+					aria-hidden={isAdminDisabled ? true : undefined}
+				>
+					<DataTable
+						ariaLabel={t("users")}
+						data={usersResponse.users}
+						columns={userColumns}
+						getRowId={(user) => user.username}
+						isLoading={loading}
+						loadingRows={rowsToRender}
+						emptyState={
+							<EmptySection
+								isFiltered={isFiltered}
+								isCreateDisabled={
+									isAdminDisabled || !canCreateUsers || userManagementLocked
+								}
+							/>
+						}
+						enableSelection
+						selectedRowIds={selectedUsernames}
+						selectedRows={selectedUsers}
+						selectedCount={selectedUsers.length}
+						onSelectionChange={(rowIds) => setSelectedUsernames(rowIds)}
+						rowActions={getUserRowActions}
+						renderRowActions={(user) => (
+							<ActionButtons
+								user={user}
+								isRTL={isRTL}
+								menuActions={toMenuItems(getUserRowActions(user), user)}
+								onEdit={
+									canOpenUserDialog ? () => onEditingUser(user) : undefined
+								}
+								onDelete={
+									canDeleteUserActions &&
+									canDeleteUserByTrafficCap(userData, user)
+										? () => handleDeleteUser(user)
+										: undefined
+								}
+							/>
+						)}
+						actionsDisplay="inline"
+						actionsPlacement="end"
+						actionsColumnWidth="210px"
+						actionsAlwaysVisible
+						onRowClick={
+							canOpenUserDialog ? (user) => onEditingUser(user) : undefined
+						}
+						sorting={userSorting}
+						onSortingChange={handleUserTableSorting}
+						manualSorting
+						dir={isRTL ? "rtl" : "ltr"}
+						selectedLabel={t("usersTable.selectedCount", { count: selectedUsers.length })}
+						renderBulkActions={() => (
+							<>
+								{canToggleUserStatus && (
+									<Button
+										size="sm"
+										variant="outline"
+										leftIcon={<RevokeIcon />}
+										onClick={handleBulkDisable}
+										isLoading={bulkAction === "disable"}
+										isDisabled={
+											Boolean(bulkAction) || bulkDisableTargets.length === 0
+										}
+									>
+										{t("usersTable.disableUser")}
+									</Button>
+								)}
+								{canToggleUserStatus && (
+									<Button
+										size="sm"
+										variant="outline"
+										leftIcon={<CheckIcon width={16} />}
+										onClick={handleBulkEnable}
+										isLoading={bulkAction === "enable"}
+										isDisabled={
+											Boolean(bulkAction) || bulkEnableTargets.length === 0
+										}
+									>
+										{t("usersTable.enableUser")}
+									</Button>
+								)}
+								{canResetUsageActions && (
+									<Button
+										size="sm"
+										variant="outline"
+										leftIcon={<ResetIcon />}
+										onClick={() => setIsBulkResetOpen(true)}
+										isLoading={bulkAction === "reset"}
+										isDisabled={
+											Boolean(bulkAction) || selectedUsers.length === 0
+										}
+									>
+										{t("usersTable.resetUsage")}
+									</Button>
+								)}
+								{canRevokeSubActions && (
+									<Button
+										size="sm"
+										variant="outline"
+										leftIcon={<RevokeIcon />}
+										onClick={handleBulkRevoke}
+										isLoading={bulkAction === "revoke"}
+										isDisabled={
+											Boolean(bulkAction) || selectedUsers.length === 0
+										}
+									>
+										{t("usersTable.revokeSub")}
+									</Button>
+								)}
+								{canDeleteUserActions && (
+									<DeleteConfirmDialog
+										description={t("usersTable.bulkDeletePrompt")}
+										onConfirm={handleBulkDelete}
+									>
+										<Button
+											size="sm"
+											colorScheme="red"
+											variant="outline"
+											leftIcon={<DeleteIcon />}
+											isLoading={bulkAction === "delete"}
+											isDisabled={
+												Boolean(bulkAction) || bulkDeleteTargets.length === 0
+											}
+										>
+											{t("delete")}
+										</Button>
+									</DeleteConfirmDialog>
+								)}
+							</>
+						)}
+						tableProps={{
+							w: "full",
+							sx: {
+								"& th, & td": {
+									px: { base: 2, xl: 3 },
+									py: { base: 2.5, xl: 2.5 },
+									verticalAlign: "middle",
+								},
+							},
+						}}
+					/>
+				</Stack>
+				{isAdminDisabled && (
+					<Flex
+						position="absolute"
+						inset={0}
+						align="center"
+						justify="center"
+						direction="column"
+						textAlign="center"
+						px={6}
+						py={8}
+						bg="rgba(255, 255, 255, 0.85)"
+						_dark={{ bg: "rgba(15, 23, 42, 0.9)" }}
+						zIndex="overlay"
+					>
+						<LockOverlayIcon color="red.400" mb={6} />
+						<Text fontSize="xl" fontWeight="bold" mb={3}>
+							{t("usersTable.adminDisabledTitle")}
+						</Text>
+						<Text maxW="480px" color="gray.600" _dark={{ color: "gray.200" }}>
+							{disabledReason ||
+								t("usersTable.adminDisabledDescription")}
+						</Text>
+					</Flex>
+				)}
+			</Box>
+			<AppDialog
+				isOpen={ipDialog !== null}
+				onClose={() => setIPDialog(null)}
+				title={t("usersTable.ipsDialogTitle")}
+				isCentered
+				size="lg"
+				scrollBehavior="inside"
+				contentProps={{
+					bg: "panel.surface",
+					borderColor: "panel.border",
+					borderWidth: "1px",
+					borderRadius: "lg",
+					overflow: "hidden",
+				}}
+				bodyProps={{ pb: 5 }}
+				footer={
+					<HStack w="full" justify="flex-end" spacing={2}>
+						<Button size="sm" onClick={() => setIPDialog(null)}>
+							{t("close")}
+						</Button>
+						<Button
+							size="sm"
+							colorScheme="primary"
+							leftIcon={<CopyIcon />}
+							onClick={handleCopyIPs}
+							isDisabled={
+								contextAction === "ips" ||
+								Boolean(ipDialog?.error) ||
+								!ipDialog?.records.length
+							}
+						>
+							{t("usersTable.copyIps")}
+						</Button>
+					</HStack>
+				}
+			>
+				<Stack spacing={4}>
+					<Box>
+						<HStack justify="space-between" align="baseline" spacing={3}>
+							<Text fontWeight="700" dir="ltr" noOfLines={1}>
+								{ipDialog?.username}
+							</Text>
+							{contextAction !== "ips" && !ipDialog?.error && (
+								<Text fontSize="xs" color="panel.textMuted" flexShrink={0}>
+									{t("usersTable.ipsDialogCount", {
+										count: ipDialog?.records.length ?? 0,
+									})}
+								</Text>
+							)}
+						</HStack>
+						<Text mt={1} fontSize="sm" color="panel.textMuted">
+							{t("usersTable.ipsDialogDescription")}
+						</Text>
+					</Box>
+
+					{contextAction === "ips" ? (
+						<Flex align="center" justify="center" gap={3} py={8}>
+							<Spinner size="sm" color="panel.accent" />
+							<Text fontSize="sm" color="panel.textMuted">
+								{t("usersTable.ipsDialogLoading")}
+							</Text>
+						</Flex>
+					) : ipDialog?.error ? (
+						<Box
+							role="alert"
+							borderWidth="1px"
+							borderColor="red.400"
+							borderRadius="md"
+							bg="red.50"
+							color="red.700"
+							_dark={{ bg: "rgba(127, 29, 29, 0.22)", color: "red.200" }}
+							px={3}
+							py={2.5}
+							fontSize="sm"
+						>
+							{ipDialog.error}
+						</Box>
+					) : !ipDialog?.records.length ? (
+						<Box
+							borderWidth="1px"
+							borderColor="panel.border"
+							borderRadius="md"
+							px={4}
+							py={8}
+							textAlign="center"
+						>
+							<Text fontSize="sm" color="panel.textMuted">
+								{t("usersTable.ipsDialogEmpty")}
+							</Text>
+						</Box>
+					) : (
+						<Stack spacing={3}>
+							{ipDialog.records.map((record, index) => {
+								const nodes = uniqueIPValues([
+									...(record.node_names || []),
+									record.node_name || `node-${record.node_id}`,
+								]);
+								const protocols = uniqueIPValues([
+									...(record.protocols || []),
+									record.protocol,
+								]);
+								const inbounds = uniqueIPValues([
+									...(record.inbound_tags || []),
+									record.inbound_tag,
+								]);
+								const ip = record.ip || record.assigned_ip || "-";
+								const metadata = [
+									protocols.join(", "),
+									inbounds.join(", "),
+									nodes.join(", "),
+								]
+									.filter(Boolean)
+									.join(" · ");
+								const assignedIPs = uniqueIPValues([
+									...(record.assigned_ips || []),
+									record.assigned_ip,
+								]).filter((value) => value !== ip);
+								const connections = Math.max(record.connections || 1, 1);
+
+								return (
+									<Box
+										as="article"
+										key={ip === "-" ? `${metadata}-${index}` : ip}
+										p={3}
+										borderWidth="1px"
+										borderColor="panel.border"
+										borderRadius="6px"
+									>
+										<Flex
+											justify="space-between"
+											direction={{ base: "column", sm: "row" }}
+											align={{ base: "stretch", sm: "flex-start" }}
+											gap={3}
+										>
+											<OperatorIdentity
+												shortName={record.operator_short_name}
+												owner={record.operator_owner}
+											/>
+											<Box minW={0} textAlign={{ base: "start", sm: "end" }}>
+												<Text
+													dir="ltr"
+													fontFamily="mono"
+													fontWeight="700"
+													fontSize="sm"
+													overflowWrap="anywhere"
+												>
+													{ip}
+												</Text>
+												<HStack
+													mt={0.5}
+													spacing={1}
+													justify={{ base: "flex-start", sm: "flex-end" }}
+													color="panel.textSecondary"
+													fontSize="xs"
+												>
+													<SignalIcon width={14} aria-hidden="true" />
+													<Text>
+														{t("usersTable.ipConnections_other", { count: connections })}
+													</Text>
+												</HStack>
+											</Box>
+										</Flex>
+
+										<HStack
+											mt={3}
+											spacing={3}
+											flexWrap="wrap"
+											color="panel.textMuted"
+											fontSize="xs"
+										>
+											{protocols.length > 0 && (
+												<HStack spacing={1}>
+													<GlobeAltIcon width={14} aria-hidden="true" />
+													<Text>{protocols.join(", ")}</Text>
+												</HStack>
+											)}
+											{inbounds.length > 0 && (
+												<HStack spacing={1}>
+													<LinkIcon width={14} aria-hidden="true" />
+													<Text>{inbounds.join(", ")}</Text>
+												</HStack>
+											)}
+											{nodes.length > 0 && (
+												<HStack spacing={1}>
+													<ServerStackIcon width={14} aria-hidden="true" />
+													<Text>{nodes.join(", ")}</Text>
+												</HStack>
+											)}
+											{record.last_seen_at && (
+												<HStack spacing={1}>
+													<ClockIcon width={14} aria-hidden="true" />
+													<Text dir="ltr">
+														{dayjs(record.last_seen_at).format(
+															"YYYY-MM-DD HH:mm",
+														)}
+													</Text>
+												</HStack>
+											)}
+										</HStack>
+										{assignedIPs.length > 0 && (
+											<Text
+												mt={1}
+												fontSize="xs"
+												color="panel.textSecondary"
+												overflowWrap="anywhere"
+											>
+												{t("usersTable.assignedIp")}:{" "}
+												<chakra.span dir="ltr" display="inline-block">
+													{assignedIPs.join(", ")}
+												</chakra.span>
+											</Text>
+										)}
+									</Box>
+								);
+							})}
+						</Stack>
+					)}
+				</Stack>
+			</AppDialog>
+			<ConfirmDialog
+				isOpen={isBulkResetOpen}
+				onClose={() => setIsBulkResetOpen(false)}
+				onConfirm={handleBulkReset}
+				title={t("usersTable.resetUsage")}
+				description={t("usersTable.bulkResetPrompt", { count: selectedUsers.length })}
+				confirmLabel={t("reset")}
+				isLoading={bulkAction === "reset"}
+				isConfirmDisabled={selectedUsers.length === 0}
+			/>
+		</VStack>
+	);
+};
+
+type ActionButtonsUser = User | UserListItem;
+type ActionButtonsProps = {
+	user: ActionButtonsUser;
+	onDelete?: () => void | Promise<void>;
+	onEdit?: () => void;
+	isRTL?: boolean;
+	// Full overflow action set for the trailing "..." menu (desktop parity
+	// with the mobile card); omitted where there is nothing extra to show.
+	menuActions?: RowActionItem[];
+};
+
+const ActionButtons: FC<ActionButtonsProps> = ({
+	user,
+	onDelete,
+	onEdit,
+	isRTL,
+	menuActions,
+}) => {
+	const { t } = useTranslation();
+	const { setQRCode, setSubLink, linkTemplates } = useDashboard();
+
+	const userLinks = generateUserLinks(user, linkTemplates);
+	const formatLink = (link?: string | null) => {
+		if (!link) return "";
+		return link.startsWith("/") ? window.location.origin + link : link;
+	};
+	const subscriptionLink = formatLink(user.subscription_url);
+	const configLinksText = userLinks.join("\n");
+	const hasConfigLinks = userLinks.length > 0;
+
+	const [copied, setCopied] = useState(false);
+	const [copiedConfigs, setCopiedConfigs] = useState(false);
+	useEffect(() => {
+		if (copied) {
+			setTimeout(() => {
+				setCopied(false);
+			}, 1000);
+		}
+	}, [copied]);
+	useEffect(() => {
+		if (copiedConfigs) {
+			setTimeout(() => {
+				setCopiedConfigs(false);
+			}, 1000);
+		}
+	}, [copiedConfigs]);
+
+	return (
+		<HStack
+			dir={isRTL ? "rtl" : "ltr"}
+			justifyContent={isRTL ? "flex-start" : "flex-end"}
+			spacing={1}
+			flexWrap="nowrap"
+			onClick={(e) => {
+				e.preventDefault();
+				e.stopPropagation();
+			}}
+		>
+			<Tooltip
+				label={copied ? t("copied") : t("usersTable.copyLink")}
+			>
+				<span>
+					<IconButton
+						aria-label={t("usersTable.copyLink")}
+						icon={copied ? <CopiedIcon /> : <SubscriptionLinkIcon />}
+						variant="ghost"
+						size="sm"
+						minW="30px"
+						h="30px"
+						isDisabled={!subscriptionLink}
+						onClick={() => {
+							void copyTextToClipboard(subscriptionLink)
+								.then(() => {
+									setCopied(true);
+								})
+								.catch(() => undefined);
+						}}
+					/>
+				</span>
+			</Tooltip>
+			<Tooltip
+				label={
+					copiedConfigs ? t("copied") : t("usersTable.copyConfigs")
+				}
+			>
+				<span>
+					<IconButton
+						aria-label={t("usersTable.copyConfigs")}
+						icon={copiedConfigs ? <CopiedIcon /> : <CopyIcon />}
+						variant="ghost"
+						size="sm"
+						minW="30px"
+						h="30px"
+						isDisabled={!hasConfigLinks}
+						onClick={() => {
+							void copyTextToClipboard(configLinksText)
+								.then(() => setCopiedConfigs(true))
+								.catch(() => undefined);
+						}}
+					/>
+				</span>
+			</Tooltip>
+			<Tooltip label={t("usersTable.qrCode")}>
+				<IconButton
+					aria-label={t("usersTable.qrCode")}
+					icon={<QRIcon />}
+					variant="ghost"
+					size="sm"
+					minW="30px"
+					h="30px"
+					onClick={() => {
+						const links = generateUserLinks(user, linkTemplates);
+						setQRCode(links, user.username);
+						setSubLink(subscriptionLink);
+					}}
+				/>
+			</Tooltip>
+			{onEdit && (
+				<Tooltip label={t("userDialog.editUser")}>
+					<IconButton
+						aria-label={t("userDialog.editUser")}
+						icon={<EditIcon />}
+						variant="ghost"
+						size="sm"
+						minW="30px"
+						h="30px"
+						onClick={onEdit}
+					/>
+				</Tooltip>
+			)}
+			{onDelete && (
+				<DeleteConfirmDialog
+					description={t("deleteUser.prompt", { username: user.username })}
+					onConfirm={onDelete}
+				>
+					<IconButton
+						aria-label={t("deleteUser.title")}
+						icon={<DeleteIcon />}
+						variant="ghost"
+						size="sm"
+						minW="30px"
+						h="30px"
+						color="red.400"
+						_hover={{ color: "red.300", bg: "whiteAlpha.100" }}
+					/>
+				</DeleteConfirmDialog>
+			)}
+			{menuActions && menuActions.length > 0 && (
+				<RowActionsMenu actions={menuActions} label={t("actions")} />
+			)}
+		</HStack>
+	);
+};
+
+type EmptySectionProps = {
+	isFiltered: boolean;
+	isCreateDisabled: boolean;
+};
+
+const EmptySection: FC<EmptySectionProps> = ({
+	isFiltered,
+	isCreateDisabled,
+}) => {
+	const { t } = useTranslation();
+	const { onCreateUser } = useDashboard();
+	const handleCreate = () => {
+		if (isCreateDisabled) {
+			return;
+		}
+		onCreateUser(true);
+	};
+	return (
+		<Box
+			padding="5"
+			py="8"
+			display="flex"
+			alignItems="center"
+			flexDirection="column"
+			gap={4}
+			w="full"
+			borderWidth="1px"
+			borderColor="light-border"
+			borderRadius="lg"
+			bg="surface.light"
+			_dark={{ bg: "surface.dark", borderColor: "whiteAlpha.200" }}
+		>
+			<EmptySectionIcon
+				maxHeight="200px"
+				maxWidth="200px"
+				_dark={{
+					'path[fill="#fff"]': {
+						fill: "gray.800",
+					},
+					'path[fill="#f2f2f2"], path[fill="#e6e6e6"], path[fill="#ccc"]': {
+						fill: "gray.700",
+					},
+					'circle[fill="#3182CE"]': {
+						fill: "primary.300",
+					},
+				}}
+				_light={{
+					'path[fill="#f2f2f2"], path[fill="#e6e6e6"], path[fill="#ccc"]': {
+						fill: "gray.300",
+					},
+					'circle[fill="#3182CE"]': {
+						fill: "primary.500",
+					},
+				}}
+			/>
+			<Text fontWeight="medium" color="gray.600" _dark={{ color: "gray.400" }}>
+				{isFiltered ? t("usersTable.noUserMatched") : t("usersTable.noUser")}
+			</Text>
+			{!isFiltered && !isCreateDisabled && (
+				<Button size="sm" colorScheme="primary" onClick={handleCreate}>
+					{t("createUser")}
+				</Button>
+			)}
+		</Box>
+	);
+};

@@ -1,0 +1,489 @@
+name: Binary Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      full_matrix:
+        description: "Build every Linux architecture. This is slower than the default release build."
+        required: false
+        type: boolean
+        default: false
+  push:
+    branches:
+      - dev
+      - go-usage-bridge
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - "**"
+  release:
+    types:
+      - published
+      - prereleased
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dashboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DASH_DIR: ./dashboard
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js 20 LTS
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ${{ env.DASH_DIR }}/package-lock.json
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "go.mod"
+
+      - name: Setup Hugo
+        uses: peaceiris/actions-hugo@v3
+        with:
+          hugo-version: '0.147.7'
+          extended: true
+
+      - name: Install dashboard dependencies
+        working-directory: ${{ env.DASH_DIR }}
+        run: npm ci
+
+      - name: Test dashboard
+        working-directory: ${{ env.DASH_DIR }}
+        run: npm test
+
+      - name: Lint dashboard
+        working-directory: ${{ env.DASH_DIR }}
+        run: npm run lint
+
+      - name: Build dashboard
+        run: bash scripts/build_dashboard.sh
+
+      - name: Test Go
+        run: go test ./internal/app/admin ./internal/app/backup ./internal/app/migrations
+
+      - name: Upload dashboard
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-build
+          path: dashboard/build
+
+  build-linux:
+    needs: dashboard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - asset_arch: "386"
+            platform: linux/386
+            image: golang:1.25-trixie
+          - asset_arch: amd64
+            platform: linux/amd64
+            image: golang:1.25-trixie
+          - asset_arch: arm64
+            platform: linux/arm64
+            image: golang:1.25-trixie
+          - asset_arch: armv5
+            platform: linux/arm/v7
+            image: golang:1.25-trixie
+          - asset_arch: armv6
+            platform: linux/arm/v7
+            image: golang:1.25-trixie
+          - asset_arch: armv7
+            platform: linux/arm/v7
+            image: golang:1.25-trixie
+          - asset_arch: s390x
+            platform: linux/s390x
+            image: golang:1.25-trixie
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate installer shell scripts
+        shell: bash
+        run: bash -n scripts/rebecca/rebecca-binary.sh scripts/rebecca/rebecca.sh scripts/rebecca/rebecca-node-binary.sh scripts/rebecca/rebecca-node.sh
+
+      - name: Download dashboard
+        uses: actions/download-artifact@v4
+        with:
+          name: dashboard-build
+          path: dashboard/build
+
+      - name: Set up QEMU
+        if: github.event_name == 'workflow_dispatch' && inputs.full_matrix == true && matrix.asset_arch != 'amd64'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Go for native Linux build
+        if: matrix.asset_arch == 'amd64'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "go.mod"
+
+      - name: Build Linux binary package
+        if: matrix.asset_arch == 'amd64' || (github.event_name == 'workflow_dispatch' && inputs.full_matrix == true)
+        shell: bash
+        env:
+          ASSET_ARCH: ${{ matrix.asset_arch }}
+          ASSET_NAME: rebecca-linux-${{ matrix.asset_arch }}.tar.gz
+          BUILD_IMAGE: ${{ matrix.image }}
+          BUILD_PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+
+          if [ "${ASSET_ARCH}" = "amd64" ]; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends \
+              bash \
+              build-essential \
+              ca-certificates \
+              git \
+              pkg-config
+            bash scripts/build_binary.sh
+            tar -C dist -czf "dist/${ASSET_NAME}" rebecca-server rebecca-cli templates
+            sha256sum "dist/${ASSET_NAME}"
+            exit 0
+          fi
+
+          docker pull --platform "${BUILD_PLATFORM}" "${BUILD_IMAGE}"
+
+          set +e
+          docker run --rm \
+            --pull never \
+            --platform "${BUILD_PLATFORM}" \
+            -e ASSET_ARCH="${ASSET_ARCH}" \
+            -e ASSET_NAME="${ASSET_NAME}" \
+            -v "${PWD}:/workspace" \
+            -w /workspace \
+            "${BUILD_IMAGE}" \
+            bash -lc '
+              set -euo pipefail
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update
+              apt-get install -y --no-install-recommends \
+                bash \
+                build-essential \
+                ca-certificates \
+                git \
+                pkg-config
+              bash scripts/build_binary.sh
+              tar -C dist -czf "dist/${ASSET_NAME}" rebecca-server rebecca-cli templates
+              sha256sum "dist/${ASSET_NAME}"
+            ' 2>&1 | tee "build-${ASSET_ARCH}.log"
+          status="${PIPESTATUS[0]}"
+          set -e
+
+          if [ "${status}" -ne 0 ]; then
+            echo "::group::Last ${ASSET_NAME} build log lines"
+            tail -n 120 "build-${ASSET_ARCH}.log" || true
+            echo "::endgroup::"
+            tail -n 20 "build-${ASSET_ARCH}.log" | while IFS= read -r line; do
+              line="${line//'%'/'%25'}"
+              line="${line//$'\r'/'%0D'}"
+              line="${line//$'\n'/'%0A'}"
+              echo "::error title=${ASSET_NAME}::${line}"
+            done
+            exit "${status}"
+          fi
+
+      - name: Upload Linux package artifact
+        if: matrix.asset_arch == 'amd64' || (github.event_name == 'workflow_dispatch' && inputs.full_matrix == true)
+        uses: actions/upload-artifact@v4
+        with:
+          name: rebecca-linux-${{ matrix.asset_arch }}
+          path: dist/rebecca-linux-${{ matrix.asset_arch }}.tar.gz
+
+  build-windows-amd64:
+    needs: dashboard
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download dashboard
+        uses: actions/download-artifact@v4
+        with:
+          name: dashboard-build
+          path: dashboard/build
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "go.mod"
+
+      - name: Set up Windows C toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          path-type: inherit
+          install: mingw-w64-ucrt-x86_64-gcc
+
+      - name: Add Windows C toolchain to PATH
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          toolchain_path="$(cygpath -w "${MINGW_PREFIX}/bin")"
+          echo "${toolchain_path}" >> "${GITHUB_PATH}"
+          gcc --version
+
+      - name: Build Windows binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/build_binary.sh
+
+      - name: Package Windows binaries
+        shell: pwsh
+        run: |
+          Compress-Archive `
+            -Path dist/rebecca-server.exe, dist/rebecca-cli.exe, dist/templates `
+            -DestinationPath dist/rebecca-windows-amd64.zip `
+            -Force
+
+      - name: Upload Windows package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rebecca-windows-amd64
+          path: dist/rebecca-windows-amd64.zip
+
+  publish-release:
+    needs:
+      - build-linux
+      - build-windows-amd64
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'release' || github.ref_type == 'tag'
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Resolve release tag
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            RELEASE_TAG="${{ github.event.release.tag_name }}"
+          else
+            RELEASE_TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "release_tag=${RELEASE_TAG}" >> "${GITHUB_OUTPUT}"
+
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: rebecca-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Upload release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_tag="${{ steps.meta.outputs.release_tag }}"
+          notes_file=".github/release-notes/${release_tag}.md"
+
+          if [ -f "${notes_file}" ]; then
+            cp "${notes_file}" release-body.md
+          else
+            printf 'Rebecca %s\n' "${release_tag}" > release-body.md
+          fi
+
+          gh release view "${release_tag}" >/dev/null 2>&1 || \
+            gh release create "${release_tag}" --title "${release_tag}" --notes-file release-body.md
+
+          gh release upload "${release_tag}" release-assets/rebecca-* --clobber
+
+  publish-dev-manifest:
+    needs:
+      - build-linux
+      - build-windows-amd64
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'push' && github.ref_name == 'dev'
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DEV_RELEASE_TAG: dev-builds
+      DEV_MANIFEST_BRANCH: dev-build-manifest
+      DEV_MANIFEST_PATH: dev-builds.json
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: rebecca-*
+          path: dev-release-assets
+          merge-multiple: true
+
+      - name: Prepare dev assets
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          build_tag="dev-${GITHUB_SHA::7}"
+          mkdir -p dev-upload-assets
+          shopt -s nullglob
+          for asset in dev-release-assets/rebecca-*; do
+            name="$(basename "$asset")"
+            case "$name" in
+              rebecca-linux-*.tar.gz)
+                base="${name%.tar.gz}"
+                cp "$asset" "dev-upload-assets/${base}-${build_tag}.tar.gz"
+                ;;
+              rebecca-windows-*.zip)
+                base="${name%.zip}"
+                cp "$asset" "dev-upload-assets/${base}-${build_tag}.zip"
+                ;;
+            esac
+          done
+          if ! compgen -G "dev-upload-assets/*" >/dev/null; then
+            echo "No dev binary assets were prepared" >&2
+            exit 1
+          fi
+          echo "build_tag=${build_tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Publish dev build assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view "${DEV_RELEASE_TAG}" >/dev/null 2>&1 || \
+            gh release create "${DEV_RELEASE_TAG}" \
+              --title "Rebecca dev binary builds" \
+              --notes "Rolling prerelease that stores Rebecca dev binary build assets." \
+              --prerelease \
+              --target "${GITHUB_SHA}"
+          gh release upload "${DEV_RELEASE_TAG}" dev-upload-assets/* --clobber
+
+      - name: Checkout dev build manifest branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "${DEV_MANIFEST_BRANCH}:refs/remotes/origin/${DEV_MANIFEST_BRANCH}" || true
+          if git show-ref --verify --quiet "refs/remotes/origin/${DEV_MANIFEST_BRANCH}"; then
+            git worktree add dev-manifest "origin/${DEV_MANIFEST_BRANCH}"
+          else
+            git worktree add --detach dev-manifest
+            git -C dev-manifest switch --orphan "${DEV_MANIFEST_BRANCH}"
+            git -C dev-manifest rm -rf . >/dev/null 2>&1 || true
+          fi
+
+      - name: Update dev build manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest_path="dev-manifest/${DEV_MANIFEST_PATH}"
+          mkdir -p "$(dirname "${manifest_path}")"
+          generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          previous_manifest='{}'
+          if [ -s "${manifest_path}" ]; then
+            previous_manifest="$(<"${manifest_path}")"
+          fi
+          jq -n \
+            --argjson previous "${previous_manifest}" \
+            --arg project "Rebecca" \
+            --arg build_tag "${{ steps.meta.outputs.build_tag }}" \
+            --arg sha "${GITHUB_SHA}" \
+            --arg branch "${GITHUB_REF_NAME}" \
+            --arg workflow "${GITHUB_WORKFLOW}" \
+            --arg run_id "${GITHUB_RUN_ID}" \
+            --arg run_number "${GITHUB_RUN_NUMBER}" \
+            --arg generated_at "${generated_at}" \
+            --arg release_tag "${DEV_RELEASE_TAG}" \
+            --arg download_base "https://github.com/${GITHUB_REPOSITORY}/releases/download/${DEV_RELEASE_TAG}" \
+            --argjson asset_names "$(find dev-upload-assets -maxdepth 1 -type f -printf '%f\n' | jq -R . | jq -s .)" \
+            '
+              def build_assets($names):
+                reduce $names[]? as $name
+                  ({};
+                    if ($name | test("^rebecca-(?<platform>(linux|windows)-[A-Za-z0-9_]+)-dev-[0-9a-fA-F]+(\\.tar\\.gz|\\.zip)$")) then
+                      ($name | capture("^rebecca-(?<platform>(linux|windows)-[A-Za-z0-9_]+)-dev-[0-9a-fA-F]+(\\.tar\\.gz|\\.zip)$")) as $match
+                      | .[$match.platform] = {name: $name, url: ($download_base + "/" + $name)}
+                    else
+                      .
+                    end);
+              def legacy_builds:
+                if (.latest? | type) == "object" then
+                  .latest as $legacy
+                  | [{
+                      tag: ($legacy.build_tag // $legacy.tag // ""),
+                      sha: ($legacy.sha // ""),
+                      branch: ($legacy.branch // "dev"),
+                      workflow: ($legacy.workflow // ""),
+                      run_id: ($legacy.run_id // ""),
+                      run_number: ($legacy.run_number // ""),
+                      created_at: ($legacy.generated_at // $legacy.created_at // ""),
+                      assets: build_assets($legacy.assets // [])
+                    } | select(.tag != "" and (.assets | length) > 0)]
+                else
+                  []
+                end;
+              ($previous | ((.builds // []) + legacy_builds)) as $previous_builds
+              | {
+                  schema_version: 1,
+                  project: $project,
+                  latest: $build_tag,
+                  updated_at: $generated_at,
+                  builds: (
+                    ([{
+                      tag: $build_tag,
+                      sha: $sha,
+                      branch: $branch,
+                      workflow: $workflow,
+                      run_id: $run_id,
+                      run_number: $run_number,
+                      created_at: $generated_at,
+                      release_tag: $release_tag,
+                      assets: build_assets($asset_names)
+                    }] + $previous_builds)
+                    | reduce .[] as $build
+                        ([];
+                          if (($build.tag // "") == "" or any(.[]; (.tag // "") == ($build.tag // ""))) then
+                            .
+                          else
+                            . + [$build]
+                          end)
+                    | .[:50]
+                  )
+                }
+            ' > "${manifest_path}"
+
+      - name: Commit dev build manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C dev-manifest add "${DEV_MANIFEST_PATH}"
+          if git -C dev-manifest diff --cached --quiet; then
+            echo "Dev build manifest is unchanged."
+            exit 0
+          fi
+          git -C dev-manifest config user.name "github-actions[bot]"
+          git -C dev-manifest config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C dev-manifest commit -m "Update dev binary build manifest [skip ci]"
+          git -C dev-manifest push origin "HEAD:${DEV_MANIFEST_BRANCH}"

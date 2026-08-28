@@ -1,0 +1,98 @@
+name: Test Database Migrations
+
+on:
+  push:
+    paths:
+      - "cmd/**"
+      - "internal/**"
+      - "go.mod"
+      - "go.sum"
+      - "scripts/build_go_cli.sh"
+      - ".github/workflows/test-db.yml"
+  pull_request:
+    paths:
+      - "cmd/**"
+      - "internal/**"
+      - "go.mod"
+      - "go.sum"
+      - "scripts/build_go_cli.sh"
+      - ".github/workflows/test-db.yml"
+
+jobs:
+  test-databases:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: testdb
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -hlocalhost -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+      mariadb:
+        image: mariadb:10.6
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: testdb
+          MYSQL_USER: testuser
+          MYSQL_PASSWORD: testpassword
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -u testuser --password=testpassword"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    strategy:
+      fail-fast: false
+      matrix:
+        db: [sqlite, mysql, mariadb]
+        include:
+          - db: sqlite
+            url: sqlite:///./test.db
+
+          - db: mysql
+            url: mysql+pymysql://root:root@localhost:3306/testdb
+
+          - db: mariadb
+            url: mysql+pymysql://testuser:testpassword@localhost:3307/testdb
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: "go.mod"
+
+      - name: Set SQLALCHEMY_DATABASE_URL
+        run: |
+          echo "TEST_FROM=github" >> $GITHUB_ENV
+          echo "REBECCA_TEST_DATABASE_URL=${{ matrix.url }}" >> $GITHUB_ENV
+          echo "SQLALCHEMY_DATABASE_URL=${{ matrix.url }}" >> $GITHUB_ENV
+
+      - name: Verify database connection
+        run: |
+          go run ./cmd/rebecca_cli migrate status || true
+
+      - name: Run Go migration unit tests
+        run: |
+          go test ./internal/app/migrations ./cmd/rebecca_cli
+
+      - name: Run Go Migrations
+        run: |
+          echo "Running migrations for: ${{ matrix.db }}"
+          go run ./cmd/rebecca_cli migrate up
+          echo "Migrations completed successfully"
+
+      - name: Verify migration status after upgrade
+        run: |
+          go run ./cmd/rebecca_cli migrate status
+
+      - name: Verify database schema
+        run: |
+          go test ./internal/app/migrations -run TestRunMigrationsExternalDatabase

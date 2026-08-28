@@ -1,0 +1,2175 @@
+import {
+	Alert,
+	AlertDescription,
+	AlertIcon,
+	Badge,
+	Box,
+	Button,
+	Checkbox,
+	Flex,
+	FormControl,
+	FormHelperText,
+	FormLabel,
+	HStack,
+	IconButton,
+	Modal,
+	ModalCloseButton,
+	ModalOverlay,
+	Radio,
+	RadioGroup,
+	SimpleGrid,
+	Spinner,
+	Stack,
+	Text,
+	Tooltip,
+	useColorModeValue,
+	useDisclosure,
+	useToast,
+	VStack,
+} from "@chakra-ui/react";
+import {
+	ArrowDownIcon,
+	ArrowPathIcon,
+	ArrowUpIcon,
+	EyeIcon,
+	PencilSquareIcon,
+	PlusIcon,
+	TrashIcon,
+} from "@heroicons/react/24/outline";
+import { AppleEmojiText } from "components/common/AppleEmojiText";
+import { PanelSelect as Select } from "components/common/PanelSelect";
+import { Input } from "components/Input";
+import { AppDialog } from "components/dialogs/AppDialog";
+import { ConfirmDialog } from "components/dialogs/ConfirmDialog";
+import {
+	DataTable,
+	PageHeader,
+	ResourceListCard,
+	TabSystem,
+	type DataTableColumn,
+	type DataTableRowAction,
+	type ResourceSummaryItem,
+} from "components/ui";
+import {
+	XrayModalBody,
+	XrayModalContent,
+	XrayModalFooter,
+	XrayModalHeader,
+} from "components/xray/XrayDialog";
+import { useAdminsStore } from "contexts/AdminsContext";
+import {
+	fetchInbounds,
+	type Inbounds,
+	useDashboard,
+} from "contexts/DashboardContext";
+import { useHosts } from "contexts/HostsContext";
+import { useServicesStore } from "contexts/ServicesContext";
+import { motion } from "framer-motion";
+import useGetUser from "hooks/useGetUser";
+import { type FC, useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { fetch } from "service/http";
+import type { Admin, AdminPermissions } from "types/Admin";
+import { AdminTrafficLimitMode } from "types/Admin";
+import type {
+	ServiceCreatePayload,
+	ServiceAdmin,
+	ServiceDeletePayload,
+	ServiceDetail,
+	ServiceHost,
+	ServiceHostAssignment,
+	ServiceSummary,
+} from "types/Service";
+import { formatBytes } from "utils/formatByte";
+
+type HostOption = {
+	id: number;
+	label: string;
+	inboundTag: string;
+	protocol: string;
+	isDisabled: boolean;
+};
+
+type ServiceDialogProps = {
+	isOpen: boolean;
+	onClose: () => void;
+	onSubmit: (
+		payload: ServiceCreatePayload,
+		serviceId?: number,
+	) => Promise<void>;
+	isSaving: boolean;
+	allHosts: HostOption[];
+	allAdmins: { id: number; username: string }[];
+	initialService?: ServiceDetail | null;
+	inbounds: Inbounds;
+	refreshInbounds: () => Promise<void>;
+	refreshHosts: () => void;
+};
+
+const GB_IN_BYTES = 1024 * 1024 * 1024;
+const MB_IN_BYTES = 1024 * 1024;
+
+const formatGigabytes = (
+	bytes?: number | null,
+	unlimitedLabel = "Unlimited",
+) => {
+	const value = Number(bytes ?? 0);
+	if (!Number.isFinite(value) || value <= 0) {
+		return unlimitedLabel;
+	}
+	const gb = value / GB_IN_BYTES;
+	return `${Number.isInteger(gb) ? gb : Number(gb.toFixed(2))} GB`;
+};
+
+const sanitizeIntegerInput = (value: string) => value.replace(/\D/g, "");
+
+const sanitizeDecimalInput = (value: string, maxDecimals = 2) => {
+	const normalized = value.replace(",", ".").replace(/[^\d.]/g, "");
+	const [integerPart = "", ...decimalParts] = normalized.split(".");
+	const decimalPart = decimalParts.join("").slice(0, maxDecimals);
+	if (normalized.includes(".")) {
+		return `${integerPart || "0"}.${decimalPart}`;
+	}
+	return integerPart;
+};
+
+const formatUnitInputValue = (bytes?: number | null, unit = GB_IN_BYTES) => {
+	const value = Number(bytes ?? 0);
+	if (!Number.isFinite(value) || value <= 0) {
+		return "";
+	}
+	const unitValue = value / unit;
+	return String(Number(unitValue.toFixed(2)));
+};
+
+const parseDecimalInput = (value: string) => {
+	const sanitized = sanitizeDecimalInput(value);
+	return sanitized && sanitized !== "0." ? Number(sanitized) : null;
+};
+
+const parseIntegerInput = (value: string) => {
+	const sanitized = sanitizeIntegerInput(value);
+	return sanitized ? Number.parseInt(sanitized, 10) : null;
+};
+
+const adminCanDeleteUsers = (admin?: Admin) =>
+	Boolean(admin?.permissions?.users?.delete);
+
+const withDeleteUserPermission = (permissions: AdminPermissions) => ({
+	...permissions,
+	users: {
+		...permissions.users,
+		delete: true,
+	},
+});
+
+const ServiceDialog: FC<ServiceDialogProps> = ({
+	isOpen,
+	onClose,
+	onSubmit,
+	isSaving,
+	allHosts,
+	allAdmins,
+	initialService,
+	inbounds,
+	refreshInbounds,
+	refreshHosts,
+}) => {
+	const { t } = useTranslation();
+	const borderColor = useColorModeValue("blackAlpha.200", "whiteAlpha.200");
+	const subtleBg = useColorModeValue("gray.50", "whiteAlpha.50");
+	const selectedBg = useColorModeValue("primary.50", "whiteAlpha.100");
+	const labelColor = useColorModeValue("gray.500", "gray.400");
+	const [name, setName] = useState(initialService?.name ?? "");
+	const [description, setDescription] = useState(
+		initialService?.description ?? "",
+	);
+	const [selectedAdmins, setSelectedAdmins] = useState<number[]>(
+		initialService?.admin_ids ?? [],
+	);
+	const [selectedHosts, setSelectedHosts] = useState<number[]>(
+		initialService?.hosts.map((host) => host.id) ?? [],
+	);
+	const [adminSearch, setAdminSearch] = useState("");
+	const [hostSearch, setHostSearch] = useState("");
+	const [hoveredHost, setHoveredHost] = useState<number | null>(null);
+	const [autoInboundBusy, setAutoInboundBusy] = useState(false);
+	const toast = useToast();
+
+	const autoInboundTag = initialService?.id
+		? `setservice-${initialService.id}`
+		: null;
+
+	const autoInboundExists = useMemo(() => {
+		if (!autoInboundTag) {
+			return false;
+		}
+		for (const inboundList of inbounds.values()) {
+			if (inboundList.some((inbound) => inbound.tag === autoInboundTag)) {
+				return true;
+			}
+		}
+		return false;
+	}, [autoInboundTag, inbounds]);
+
+	useEffect(() => {
+		if (isOpen) {
+			setName(initialService?.name ?? "");
+			setDescription(initialService?.description ?? "");
+			setSelectedAdmins(initialService?.admin_ids ?? []);
+			setSelectedHosts(initialService?.hosts.map((host) => host.id) ?? []);
+			setAdminSearch("");
+			setHostSearch("");
+			setAutoInboundBusy(false);
+		}
+	}, [isOpen, initialService]);
+
+	const hostMap = useMemo(() => {
+		return new Map(allHosts.map((host) => [host.id, host]));
+	}, [allHosts]);
+
+	const availableHosts = useMemo(() => {
+		return allHosts.filter(
+			(host) => !selectedHosts.includes(host.id) && !host.isDisabled,
+		);
+	}, [allHosts, selectedHosts]);
+
+	const filteredAvailableHosts = useMemo(() => {
+		const query = hostSearch.trim().toLowerCase();
+		if (!query) {
+			return availableHosts;
+		}
+		return availableHosts.filter((host) => {
+			const label = host.label.toLowerCase();
+			const inboundTag = host.inboundTag.toLowerCase();
+			const protocol = host.protocol.toLowerCase();
+			return (
+				label.includes(query) ||
+				inboundTag.includes(query) ||
+				protocol.includes(query)
+			);
+		});
+	}, [availableHosts, hostSearch]);
+
+	const filteredAdmins = useMemo(() => {
+		const query = adminSearch.trim().toLowerCase();
+		if (!query) {
+			return allAdmins;
+		}
+		return allAdmins.filter((admin) =>
+			admin.username.toLowerCase().includes(query),
+		);
+	}, [adminSearch, allAdmins]);
+
+	const selectedAdminsSet = useMemo(
+		() => new Set(selectedAdmins),
+		[selectedAdmins],
+	);
+
+	const handleToggleAllAdmins = () => {
+		const hasAllSelected =
+			selectedAdmins.length === allAdmins.length && allAdmins.length > 0;
+		setSelectedAdmins(hasAllSelected ? [] : allAdmins.map((admin) => admin.id));
+	};
+
+	const handleAdminToggle = (adminId: number) => {
+		setSelectedAdmins((prev) =>
+			prev.includes(adminId)
+				? prev.filter((id) => id !== adminId)
+				: [...prev, adminId],
+		);
+	};
+
+	const handleHostToggle = (hostId: number) => {
+		setSelectedHosts((prev) =>
+			prev.includes(hostId)
+				? prev.filter((id) => id !== hostId)
+				: [...prev, hostId],
+		);
+	};
+
+	const moveHost = (hostId: number, direction: "up" | "down") => {
+		setSelectedHosts((prev) => {
+			const index = prev.indexOf(hostId);
+			if (index === -1) return prev;
+			const swapWith = direction === "up" ? index - 1 : index + 1;
+			if (swapWith < 0 || swapWith >= prev.length) {
+				return prev;
+			}
+			const updated = [...prev];
+			[updated[index], updated[swapWith]] = [updated[swapWith], updated[index]];
+			return updated;
+		});
+	};
+
+	const submit = async () => {
+		if (!name.trim()) {
+			toast({
+				status: "warning",
+				title: t("services.validation.nameRequired"),
+			});
+			return;
+		}
+		if (!selectedHosts.length) {
+			toast({
+				status: "warning",
+				title: t("services.validation.hostRequired"),
+			});
+			return;
+		}
+
+		const assignments: ServiceHostAssignment[] = selectedHosts.map(
+			(hostId, index) => ({
+				host_id: hostId,
+				sort: index,
+			}),
+		);
+
+		await onSubmit(
+			{
+				name: name.trim(),
+				description: description?.trim() || null,
+				admin_ids: selectedAdmins,
+				hosts: assignments,
+			},
+			initialService?.id,
+		);
+	};
+
+	const handleCreateAutoInbound = async () => {
+		if (!initialService?.id || autoInboundExists) {
+			return;
+		}
+		setAutoInboundBusy(true);
+		try {
+			await fetch(`/v2/services/${initialService.id}/auto-inbound`, {
+				method: "POST",
+			});
+			await refreshInbounds();
+			refreshHosts();
+			toast({
+				status: "success",
+				title: t("services.autoInbound.created"),
+			});
+		} catch (error: any) {
+			toast({
+				status: "error",
+				title: error?.data?.detail ?? t("services.autoInbound.createFailed"),
+			});
+		} finally {
+			setAutoInboundBusy(false);
+		}
+	};
+
+	const handleDeleteAutoInbound = async () => {
+		if (!initialService?.id || !autoInboundExists) {
+			return;
+		}
+		setAutoInboundBusy(true);
+		try {
+			await fetch(`/v2/services/${initialService.id}/auto-inbound`, {
+				method: "DELETE",
+			});
+			await refreshInbounds();
+			refreshHosts();
+			toast({
+				status: "success",
+				title: t("services.autoInbound.deleted"),
+			});
+		} catch (error: any) {
+			toast({
+				status: "error",
+				title: error?.data?.detail ?? t("services.autoInbound.deleteFailed"),
+			});
+		} finally {
+			setAutoInboundBusy(false);
+		}
+	};
+
+	return (
+		<Modal isOpen={isOpen} onClose={onClose} size="5xl" scrollBehavior="inside">
+			<ModalOverlay bg="blackAlpha.400" backdropFilter="blur(8px)" />
+			<XrayModalContent
+				mx="3"
+				sx={{
+					".service-dialog-section .chakra-form-control": {
+						display: "block",
+						gridTemplateColumns: "none",
+					},
+					".service-dialog-list": {
+						borderColor,
+						bg: subtleBg,
+					},
+				}}
+			>
+				<XrayModalHeader>
+					{initialService ? t("services.editTitle") : t("services.createTitle")}
+				</XrayModalHeader>
+				<ModalCloseButton />
+				<XrayModalBody>
+					<Stack spacing={4}>
+						<Box className="xray-dialog-section service-dialog-section">
+							<Text fontSize="sm" fontWeight="semibold" mb={3}>
+								{t("services.basicInfo")}
+							</Text>
+							<SimpleGrid columns={{ base: 1, md: 2 }} spacing={3}>
+								<Input
+									label={t("services.fields.name")}
+									value={name}
+									onChange={(event) => setName(event.target.value)}
+									maxLength={128}
+									isRequired
+								/>
+								<Input
+									label={t("services.fields.description")}
+									value={description ?? ""}
+									onChange={(event) => setDescription(event.target.value)}
+									maxLength={256}
+								/>
+							</SimpleGrid>
+						</Box>
+
+						<Box className="xray-dialog-section service-dialog-section">
+							<Flex justify="space-between" align="center" gap={3} mb={3}>
+								<Text fontSize="sm" fontWeight="semibold">
+									{t("services.fields.admins")}
+								</Text>
+								<Badge borderRadius="md" variant="subtle" colorScheme="primary">
+									{selectedAdmins.length} / {allAdmins.length}
+								</Badge>
+							</Flex>
+							<Stack spacing={2}>
+								<Checkbox
+									isChecked={
+										selectedAdmins.length === allAdmins.length &&
+										allAdmins.length > 0
+									}
+									onChange={handleToggleAllAdmins}
+									isDisabled={allAdmins.length === 0}
+								>
+									{t("services.selectAllAdmins")}
+								</Checkbox>
+								<Input
+									value={adminSearch}
+									onChange={(event) => setAdminSearch(event.target.value)}
+									placeholder={t("services.searchAdmins")}
+									size="sm"
+									clearable
+								/>
+								<VStack
+									className="service-dialog-list"
+									align="stretch"
+									spacing={1.5}
+									maxH="170px"
+									overflowY="auto"
+									borderWidth="1px"
+									borderRadius="md"
+									p={2}
+								>
+									{allAdmins.length === 0 ? (
+										<Text fontSize="sm" color={labelColor}>
+											{t("services.noAdminsFound")}
+										</Text>
+									) : filteredAdmins.length === 0 ? (
+										<Text fontSize="sm" color={labelColor}>
+											{t("services.noAdminsMatching")}
+										</Text>
+									) : (
+										filteredAdmins.map((admin) => {
+											const isSelected = selectedAdminsSet.has(admin.id);
+											return (
+												<Box
+													key={admin.id}
+													borderWidth="1px"
+													borderRadius="md"
+													px={2.5}
+													py={2}
+													borderColor={isSelected ? "primary.400" : borderColor}
+													bg={isSelected ? selectedBg : "transparent"}
+													_hover={{
+														borderColor: "primary.300",
+														cursor: "pointer",
+													}}
+													transition="all 0.1s ease-in-out"
+													onClick={() => handleAdminToggle(admin.id)}
+													onKeyDown={(event) => {
+														if (event.key === "Enter" || event.key === " ") {
+															event.preventDefault();
+															handleAdminToggle(admin.id);
+														}
+													}}
+													role="button"
+													tabIndex={0}
+												>
+													<Flex align="center" justify="space-between" gap={3}>
+														<Text fontWeight="medium" noOfLines={1}>
+															{admin.username}
+														</Text>
+														{isSelected && (
+															<Badge colorScheme="primary" borderRadius="md">
+																{t("services.selected")}
+															</Badge>
+														)}
+													</Flex>
+												</Box>
+											);
+										})
+									)}
+								</VStack>
+							</Stack>
+							<Text fontSize="xs" color={labelColor} mt={2}>
+								{t("services.adminHint")}
+							</Text>
+						</Box>
+
+						<Box className="xray-dialog-section service-dialog-section">
+							<Flex
+								justify="space-between"
+								align={{ base: "flex-start", md: "center" }}
+								gap={3}
+								flexWrap="wrap"
+								mb={3}
+							>
+								<Box minW={0}>
+									<Text fontSize="sm" fontWeight="semibold">
+										{t("services.autoInbound.title")}
+									</Text>
+									<Text
+										fontFamily="mono"
+										fontSize="xs"
+										color={labelColor}
+										mt={1}
+									>
+										{autoInboundTag ?? t("services.autoInbound.pendingTag")}
+									</Text>
+								</Box>
+								<Badge
+									borderRadius="md"
+									colorScheme={autoInboundExists ? "green" : "gray"}
+								>
+									{autoInboundExists
+										? t("services.autoInbound.statusCreated")
+										: t("services.autoInbound.statusMissing")}
+								</Badge>
+							</Flex>
+							<HStack spacing={2} flexWrap="wrap">
+								<Button
+									size="sm"
+									onClick={handleCreateAutoInbound}
+									isDisabled={
+										!initialService?.id || autoInboundExists || autoInboundBusy
+									}
+									isLoading={autoInboundBusy}
+								>
+									{t("services.autoInbound.create")}
+								</Button>
+								<Button
+									size="sm"
+									variant="outline"
+									colorScheme="red"
+									onClick={handleDeleteAutoInbound}
+									isDisabled={
+										!initialService?.id || !autoInboundExists || autoInboundBusy
+									}
+									isLoading={autoInboundBusy}
+								>
+									{t("services.autoInbound.delete")}
+								</Button>
+							</HStack>
+							<Text fontSize="xs" color={labelColor} mt={2}>
+								{t("services.autoInbound.helper")}
+							</Text>
+						</Box>
+
+						<SimpleGrid columns={{ base: 1, lg: 2 }} spacing={4}>
+							<Box className="xray-dialog-section service-dialog-section">
+								<Text fontSize="sm" fontWeight="semibold" mb={3}>
+									{t("services.availableHosts")}
+								</Text>
+								<Stack spacing={2}>
+									<Input
+										value={hostSearch}
+										onChange={(event) => setHostSearch(event.target.value)}
+										placeholder={t("services.searchHosts")}
+										size="sm"
+										clearable
+									/>
+									<VStack
+										className="service-dialog-list"
+										align="stretch"
+										spacing={1.5}
+										maxH="260px"
+										overflowY="auto"
+										borderWidth="1px"
+										borderRadius="md"
+										p={2}
+									>
+										{availableHosts.length === 0 ? (
+											<Text fontSize="sm" color={labelColor}>
+												{t("services.noHostsLeft")}
+											</Text>
+										) : filteredAvailableHosts.length === 0 ? (
+											<Text fontSize="sm" color={labelColor}>
+												{t("services.noHostsMatching")}
+											</Text>
+										) : (
+											filteredAvailableHosts.map((host) => (
+												<Box
+													key={host.id}
+													borderWidth="1px"
+													borderRadius="md"
+													px={2.5}
+													py={2}
+													borderColor={
+														hoveredHost === host.id
+															? "primary.400"
+															: borderColor
+													}
+													_hover={{
+														borderColor: "primary.300",
+														cursor: "pointer",
+													}}
+													onMouseEnter={() => setHoveredHost(host.id)}
+													onMouseLeave={() => setHoveredHost(null)}
+													onClick={() => handleHostToggle(host.id)}
+												>
+													<Text fontWeight="medium" noOfLines={1}>
+														<AppleEmojiText>{host.label}</AppleEmojiText>
+													</Text>
+													<Text fontSize="xs" color={labelColor}>
+														{host.protocol.toUpperCase()} - {host.inboundTag}
+													</Text>
+												</Box>
+											))
+										)}
+									</VStack>
+								</Stack>
+							</Box>
+
+							<Box className="xray-dialog-section service-dialog-section">
+								<Flex justify="space-between" align="center" gap={3} mb={3}>
+									<Text fontSize="sm" fontWeight="semibold">
+										{t("services.selectedHosts")}
+									</Text>
+									<Badge borderRadius="md" variant="subtle">
+										{selectedHosts.length}
+									</Badge>
+								</Flex>
+								<VStack
+									className="service-dialog-list"
+									align="stretch"
+									spacing={1.5}
+									maxH="300px"
+									overflowY="auto"
+									borderWidth="1px"
+									borderRadius="md"
+									p={2}
+								>
+									{selectedHosts.length === 0 && (
+										<Text fontSize="sm" color={labelColor}>
+											{t("services.noHostsSelected")}
+										</Text>
+									)}
+									{selectedHosts.map((hostId, index) => {
+										const host = hostMap.get(hostId);
+										if (!host) return null;
+										return (
+											<motion.div layout key={hostId}>
+												<Flex
+													align="center"
+													justify="space-between"
+													borderWidth="1px"
+													borderRadius="md"
+													borderColor={borderColor}
+													px={2.5}
+													py={2}
+													gap={3}
+												>
+													<Box minW={0}>
+														<HStack spacing={2} align="center">
+															<Text fontWeight="medium" noOfLines={1}>
+																<AppleEmojiText>{host.label}</AppleEmojiText>
+															</Text>
+															{host.isDisabled && (
+																<Badge colorScheme="red" borderRadius="md">
+																	{t("services.hostDisabled")}
+																</Badge>
+															)}
+														</HStack>
+														<Text fontSize="xs" color={labelColor}>
+															{host.protocol.toUpperCase()} - {host.inboundTag}
+														</Text>
+													</Box>
+													<HStack spacing={1} flexShrink={0}>
+														<Tooltip label={t("services.moveUp")}>
+															<IconButton
+																aria-label="Move up"
+																size="sm"
+																variant="ghost"
+																icon={<ArrowUpIcon width={16} />}
+																onClick={() => moveHost(hostId, "up")}
+																isDisabled={index === 0}
+															/>
+														</Tooltip>
+														<Tooltip label={t("services.moveDown")}>
+															<IconButton
+																aria-label="Move down"
+																size="sm"
+																variant="ghost"
+																icon={<ArrowDownIcon width={16} />}
+																onClick={() => moveHost(hostId, "down")}
+																isDisabled={index === selectedHosts.length - 1}
+															/>
+														</Tooltip>
+														<Tooltip label={t("services.removeHost")}>
+															<IconButton
+																aria-label="Remove"
+																size="sm"
+																variant="ghost"
+																icon={<TrashIcon width={16} />}
+																onClick={() => handleHostToggle(hostId)}
+															/>
+														</Tooltip>
+													</HStack>
+												</Flex>
+											</motion.div>
+										);
+									})}
+								</VStack>
+							</Box>
+						</SimpleGrid>
+					</Stack>
+				</XrayModalBody>
+				<XrayModalFooter>
+					<Button variant="ghost" onClick={onClose}>
+						{t("cancel")}
+					</Button>
+					<Button colorScheme="primary" onClick={submit} isLoading={isSaving}>
+						{initialService ? t("saveChanges") : t("create")}
+					</Button>
+				</XrayModalFooter>
+			</XrayModalContent>
+		</Modal>
+	);
+};
+
+const ServicesPage: FC = () => {
+	const { t, i18n } = useTranslation();
+	const _isRTL = i18n.language === "fa";
+	const labelColor = useColorModeValue("gray.500", "gray.400");
+	const toast = useToast();
+	const { userData, getUserIsSuccess } = useGetUser();
+	const canManageServices =
+		getUserIsSuccess && Boolean(userData.permissions?.sections.services);
+	const servicesStore = useServicesStore();
+	const adminStore = useAdminsStore();
+	const hostsStore = useHosts();
+	const { inbounds, refetchUsers } = useDashboard();
+
+	const dialogDisclosure = useDisclosure();
+	const [editingService, setEditingService] = useState<ServiceDetail | null>(
+		null,
+	);
+	const [activeServiceTab, setActiveServiceTab] = useState<"hosts" | "admins">(
+		"admins",
+	);
+	const [savingAdminLimitId, setSavingAdminLimitId] = useState<number | null>(
+		null,
+	);
+	const [editingServiceAdminLimit, setEditingServiceAdminLimit] =
+		useState<ServiceAdmin | null>(null);
+	const [serviceAdminLimitForm, setServiceAdminLimitForm] = useState({
+		traffic_limit_mode: AdminTrafficLimitMode.UsedTraffic,
+		data_limit_gb: "",
+		users_limit: "",
+		show_user_traffic: true,
+		delete_user_usage_limit_enabled: false,
+		delete_user_usage_limit_mb: "",
+	});
+
+	useEffect(() => {
+		if (!getUserIsSuccess || !canManageServices) {
+			return;
+		}
+		servicesStore.fetchServices();
+		adminStore.fetchAdminOptions({ limit: 1000, offset: 0, sort: "username" });
+		fetchInbounds();
+		hostsStore.fetchHosts();
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [
+		getUserIsSuccess,
+		canManageServices,
+		adminStore.fetchAdminOptions,
+		hostsStore.fetchHosts,
+		servicesStore.fetchServices,
+	]);
+
+	const adminOptions = useMemo(() => {
+		return adminStore.adminOptions
+			.slice()
+			.sort((a, b) => a.username.localeCompare(b.username))
+			.map((admin) => ({
+				id: admin.id!,
+				username: admin.username,
+			}));
+	}, [adminStore.adminOptions]);
+
+	const inboundProtocols = useMemo(
+		() =>
+			new Map(
+				Array.from(inbounds.values())
+					.flat()
+					.map((inbound) => [inbound.tag, inbound.protocol]),
+			),
+		[inbounds],
+	);
+
+	const hostOptions: HostOption[] = useMemo(() => {
+		const options: HostOption[] = [];
+		for (const [tag, hosts] of Object.entries(hostsStore.hosts)) {
+			const protocol = inboundProtocols.get(tag) ?? "unknown";
+			hosts.forEach((host) => {
+				if (host.id == null) {
+					return;
+				}
+				options.push({
+					id: host.id,
+					label: host.remark,
+					inboundTag: tag,
+					protocol,
+					isDisabled: Boolean(host.is_disabled),
+				});
+			});
+		}
+		return options;
+	}, [hostsStore.hosts, inboundProtocols]);
+
+	const openCreateDialog = () => {
+		setEditingService(null);
+		dialogDisclosure.onOpen();
+	};
+
+	const openEditDialog = async (serviceId: number) => {
+		try {
+			const detail = await servicesStore.fetchServiceDetail(serviceId);
+			if (!detail) return;
+			setEditingService(detail);
+			dialogDisclosure.onOpen();
+		} catch (_error) {
+			toast({
+				status: "error",
+				title: t("services.fetchFailed"),
+			});
+		}
+	};
+
+	const openServiceDetail = async (
+		serviceId: number,
+		tab: "hosts" | "admins" = "admins",
+	) => {
+		setActiveServiceTab(tab);
+		await servicesStore.fetchServiceDetail(serviceId);
+	};
+
+	const handleSubmit = async (
+		payload: ServiceCreatePayload,
+		serviceId?: number,
+	) => {
+		try {
+			if (serviceId) {
+				await servicesStore.updateService(serviceId, payload);
+				toast({
+					status: "success",
+					title: t("services.updated"),
+				});
+			} else {
+				await servicesStore.createService(payload);
+				toast({
+					status: "success",
+					title: t("services.created"),
+				});
+			}
+			refetchUsers(true);
+			dialogDisclosure.onClose();
+		} catch (error: any) {
+			toast({
+				status: "error",
+				title: error?.data?.detail ?? t("services.saveFailed"),
+			});
+		}
+	};
+
+	const beginDeleteService = async (serviceId: number) => {
+		try {
+			const detail = await servicesStore.fetchServiceDetail(serviceId);
+			if (!detail) return;
+			setServicePendingDelete(detail);
+			openDeleteDialog();
+		} catch (error: any) {
+			toast({
+				status: "error",
+				title: error?.data?.detail ?? t("services.deleteFailed"),
+			});
+		}
+	};
+
+	const handleResetUsage = async (serviceId: number) => {
+		try {
+			await servicesStore.resetServiceUsage(serviceId);
+			toast({
+				status: "success",
+				title: t("services.resetSuccess"),
+			});
+		} catch (error: any) {
+			toast({
+				status: "error",
+				title: error?.data?.detail ?? t("services.resetFailed"),
+			});
+		}
+	};
+
+	const [resetServiceId, setResetServiceId] = useState<number | null>(null);
+	const [isResetting, setIsResetting] = useState(false);
+	const {
+		isOpen: isResetDialogOpen,
+		onOpen: openResetDialog,
+		onClose: closeResetDialog,
+	} = useDisclosure();
+
+	const openResetConfirmation = (serviceId: number) => {
+		setResetServiceId(serviceId);
+		openResetDialog();
+	};
+
+	const confirmResetUsage = async () => {
+		if (resetServiceId == null) {
+			return;
+		}
+		setIsResetting(true);
+		try {
+			await handleResetUsage(resetServiceId);
+		} finally {
+			setIsResetting(false);
+			closeResetDialog();
+		}
+	};
+
+	const resetTargetName =
+		resetServiceId != null
+			? servicesStore.services.find((service) => service.id === resetServiceId)
+					?.name
+			: undefined;
+
+	const handleCloseDeleteDialog = () => {
+		setServicePendingDelete(null);
+		closeDeleteDialog();
+	};
+
+	const confirmDeleteService = async () => {
+		if (!servicePendingDelete) {
+			return;
+		}
+		const payload: ServiceDeletePayload = {
+			mode: servicePendingDelete.user_count ? deleteMode : "delete_users",
+			unlink_admins: unlinkAdmins,
+		};
+		if (payload.mode === "transfer_users") {
+			if (!targetServiceId) {
+				toast({
+					status: "warning",
+					title: t("services.selectTargetService"),
+					description: t("services.targetServiceRequired"),
+				});
+				return;
+			}
+			payload.target_service_id = targetServiceId;
+		}
+		setIsDeleting(true);
+		try {
+			await servicesStore.deleteService(servicePendingDelete.id, payload);
+			toast({
+				status: "success",
+				title: t("services.deleted"),
+			});
+			refetchUsers(true);
+			handleCloseDeleteDialog();
+		} catch (error: any) {
+			toast({
+				status: "error",
+				title: error?.data?.detail ?? t("services.deleteFailed"),
+			});
+		} finally {
+			setIsDeleting(false);
+		}
+	};
+
+	const [servicePendingDelete, setServicePendingDelete] =
+		useState<ServiceDetail | null>(null);
+	const [deleteMode, setDeleteMode] = useState<
+		"delete_users" | "transfer_users"
+	>("transfer_users");
+	const [unlinkAdmins, setUnlinkAdmins] = useState(false);
+	const [targetServiceId, setTargetServiceId] = useState<number | null>(null);
+	const [isDeleting, setIsDeleting] = useState(false);
+	const {
+		isOpen: isDeleteDialogOpen,
+		onOpen: openDeleteDialog,
+		onClose: closeDeleteDialog,
+	} = useDisclosure();
+
+	const otherServices = useMemo(() => {
+		if (!servicePendingDelete) {
+			return servicesStore.services;
+		}
+		return servicesStore.services.filter(
+			(service) => service.id !== servicePendingDelete.id,
+		);
+	}, [servicePendingDelete, servicesStore.services]);
+	const servicesSummary = useMemo(
+		() =>
+			servicesStore.services.reduce(
+				(summary, service) => ({
+					totalHosts: summary.totalHosts + Number(service.host_count || 0),
+					totalUsers: summary.totalUsers + Number(service.user_count || 0),
+					totalUsage: summary.totalUsage + Number(service.used_traffic || 0),
+					lifetimeUsage:
+						summary.lifetimeUsage + Number(service.lifetime_used_traffic || 0),
+					brokenServices: summary.brokenServices + (service.has_hosts ? 0 : 1),
+				}),
+				{
+					totalHosts: 0,
+					totalUsers: 0,
+					totalUsage: 0,
+					lifetimeUsage: 0,
+					brokenServices: 0,
+				},
+			),
+		[servicesStore.services],
+	);
+
+	const serviceSummaryItems = useMemo<ResourceSummaryItem[]>(
+		() => [
+			{
+				label: t("services.title"),
+				value: servicesStore.services.length,
+				colorScheme: "gray",
+			},
+			{
+				label: t("services.columns.hosts"),
+				value: servicesSummary.totalHosts,
+				colorScheme: "green",
+			},
+			{
+				label: t("users"),
+				value: servicesSummary.totalUsers,
+				colorScheme: "orange",
+			},
+			{
+				label: t("services.columns.usage"),
+				value: formatBytes(servicesSummary.totalUsage),
+				colorScheme: "blue",
+			},
+			{
+				label: t("services.columns.lifetime"),
+				value: formatBytes(servicesSummary.lifetimeUsage),
+				colorScheme: "purple",
+				helper:
+					servicesSummary.brokenServices > 0
+						? t("services.brokenCount", {
+								count: servicesSummary.brokenServices,
+							})
+						: undefined,
+			},
+		],
+		[servicesStore.services.length, servicesSummary, t],
+	);
+
+	useEffect(() => {
+		if (servicePendingDelete) {
+			const hasUsers = servicePendingDelete.user_count > 0;
+			setDeleteMode(hasUsers ? "transfer_users" : "delete_users");
+			setUnlinkAdmins(servicePendingDelete.admin_ids.length > 0);
+			setTargetServiceId(null);
+		}
+	}, [servicePendingDelete]);
+
+	useEffect(() => {
+		if (deleteMode === "delete_users") {
+			setTargetServiceId(null);
+		} else if (targetServiceId === null && otherServices.length > 0) {
+			setTargetServiceId(otherServices[0].id);
+		}
+	}, [deleteMode, otherServices, targetServiceId]);
+
+	const serviceColumns = useMemo<DataTableColumn<ServiceSummary>[]>(
+		() => [
+			{
+				id: "id",
+				header: t("services.columns.id"),
+				accessor: (service) => service.id,
+				priority: "medium",
+				width: "78px",
+				maxWidth: "90px",
+				mobilePriority: 1,
+				mobileMetaLabel: t("services.columns.id"),
+				cell: (service) => (
+					<Badge borderRadius="md" variant="subtle">
+						#{service.id}
+					</Badge>
+				),
+			},
+			{
+				id: "name",
+				header: t("services.columns.name"),
+				accessor: "name",
+				isPrimary: true,
+				priority: "primary",
+				width: "240px",
+				minWidth: "200px",
+				maxWidth: "300px",
+				truncate: true,
+				tooltip: true,
+				cellAlign: "start",
+				mobilePriority: 0,
+				mobileMetaLabel: t("services.columns.name"),
+				cell: (service) => (
+					<VStack spacing={0.5} align="start" textAlign="start" minW={0}>
+						<HStack spacing={2} justify="flex-start" minW={0} maxW="full">
+							<Text fontWeight="semibold" noOfLines={1}>
+								{service.name}
+							</Text>
+							{!service.has_hosts && (
+								<Badge colorScheme="red" borderRadius="md" flexShrink={0}>
+									{t("services.broken")}
+								</Badge>
+							)}
+						</HStack>
+						{service.description && (
+							<Text fontSize="xs" color={labelColor} noOfLines={1}>
+								{service.description}
+							</Text>
+						)}
+					</VStack>
+				),
+			},
+			{
+				id: "hosts",
+				header: t("services.columns.hosts"),
+				accessor: (service) => service.host_count,
+				priority: "high",
+				width: "96px",
+				maxWidth: "110px",
+				mobilePriority: 2,
+				mobileMetaLabel: t("services.columns.hosts"),
+				cell: (service) => (
+					<Text fontWeight="semibold">{service.host_count}</Text>
+				),
+			},
+			{
+				id: "users",
+				header: t("users"),
+				accessor: (service) => service.user_count,
+				priority: "high",
+				width: "96px",
+				maxWidth: "110px",
+				mobilePriority: 3,
+				mobileMetaLabel: t("users"),
+				cell: (service) => (
+					<Text fontWeight="semibold">{service.user_count}</Text>
+				),
+			},
+			{
+				id: "usage",
+				header: t("services.columns.usage"),
+				accessor: (service) => service.used_traffic,
+				priority: "medium",
+				width: "132px",
+				maxWidth: "150px",
+				mobilePriority: 4,
+				mobileSummary: true,
+				mobileMetaLabel: t("services.columns.usage"),
+				cell: (service) => (
+					<Text dir="ltr" sx={{ unicodeBidi: "isolate" }} whiteSpace="nowrap">
+						{formatBytes(service.used_traffic)}
+					</Text>
+				),
+			},
+			{
+				id: "lifetime",
+				header: t("services.columns.lifetime"),
+				accessor: (service) => service.lifetime_used_traffic,
+				priority: "low",
+				hideBelow: "xl",
+				width: "132px",
+				maxWidth: "150px",
+				mobilePriority: 5,
+				mobileMetaLabel: t("services.columns.lifetime"),
+				cell: (service) => (
+					<Text dir="ltr" sx={{ unicodeBidi: "isolate" }} whiteSpace="nowrap">
+						{formatBytes(service.lifetime_used_traffic)}
+					</Text>
+				),
+			},
+		],
+		[labelColor, t],
+	);
+
+	const serviceRowActions = (
+		service: ServiceSummary,
+	): DataTableRowAction<ServiceSummary>[] => {
+		const actions: DataTableRowAction<ServiceSummary>[] = [
+			{
+				id: "view",
+				label: t("services.view"),
+				icon: <EyeIcon width={16} />,
+				onClick: () => {
+					void openServiceDetail(service.id, "admins");
+				},
+			},
+		];
+
+		if (canManageServices) {
+			actions.push(
+				{
+					id: "edit",
+					label: t("edit"),
+					icon: <PencilSquareIcon width={16} />,
+					onClick: () => openEditDialog(service.id),
+				},
+				{
+					id: "reset",
+					label: t("services.resetUsage"),
+					icon: <ArrowPathIcon width={16} />,
+					onClick: () => openResetConfirmation(service.id),
+				},
+				{
+					id: "delete",
+					label: t("delete"),
+					icon: <TrashIcon width={16} />,
+					onClick: () => beginDeleteService(service.id),
+					isDanger: true,
+				},
+			);
+		}
+
+		return actions;
+	};
+
+	const selectedService = servicesStore.serviceDetail;
+
+	const saveServiceAdminLimit = useCallback(
+		async (
+			adminId: number,
+			payload: {
+				traffic_limit_mode?: AdminTrafficLimitMode;
+				data_limit?: number | null;
+				show_user_traffic?: boolean;
+				users_limit?: number | null;
+				delete_user_usage_limit_enabled?: boolean;
+				delete_user_usage_limit?: number | null;
+			},
+		) => {
+			if (!selectedService) return false;
+			setSavingAdminLimitId(adminId);
+			try {
+				if (payload.delete_user_usage_limit_enabled === true) {
+					const targetAdmin = adminStore.adminOptions.find(
+						(item) => item.id === adminId,
+					);
+					if (targetAdmin && !adminCanDeleteUsers(targetAdmin)) {
+						await adminStore.updateAdmin(targetAdmin.username, {
+							permissions: withDeleteUserPermission(targetAdmin.permissions),
+						});
+					}
+				}
+				await servicesStore.updateServiceAdminLimits(
+					selectedService.id,
+					adminId,
+					payload,
+				);
+				if (payload.delete_user_usage_limit_enabled === true) {
+					await servicesStore.fetchServiceDetail(selectedService.id);
+				}
+				return true;
+			} catch (error) {
+				toast({
+					status: "error",
+					title: t("services.adminLimitSaveFailed"),
+					description: error instanceof Error ? error.message : undefined,
+				});
+				return false;
+			} finally {
+				setSavingAdminLimitId(null);
+			}
+		},
+		[adminStore, selectedService, servicesStore, t, toast],
+	);
+
+	const openServiceAdminLimitEditor = (link: ServiceAdmin) => {
+		setEditingServiceAdminLimit(link);
+		setServiceAdminLimitForm({
+			traffic_limit_mode:
+				link.traffic_limit_mode ?? AdminTrafficLimitMode.UsedTraffic,
+			data_limit_gb: formatUnitInputValue(link.data_limit),
+			users_limit:
+				link.users_limit !== undefined && link.users_limit !== null
+					? String(link.users_limit)
+					: "",
+			show_user_traffic: link.show_user_traffic,
+			delete_user_usage_limit_enabled: link.delete_user_usage_limit_enabled,
+			delete_user_usage_limit_mb: formatUnitInputValue(
+				link.delete_user_usage_limit,
+				MB_IN_BYTES,
+			),
+		});
+	};
+
+	const closeServiceAdminLimitEditor = () => {
+		setEditingServiceAdminLimit(null);
+	};
+
+	const submitServiceAdminLimitEditor = async () => {
+		if (!editingServiceAdminLimit) return;
+		const dataLimitGb = parseDecimalInput(serviceAdminLimitForm.data_limit_gb);
+		const usersLimit = parseIntegerInput(serviceAdminLimitForm.users_limit);
+		const deleteUserUsageLimitMb = parseDecimalInput(
+			serviceAdminLimitForm.delete_user_usage_limit_mb,
+		);
+		const saved = await saveServiceAdminLimit(editingServiceAdminLimit.id, {
+			traffic_limit_mode: serviceAdminLimitForm.traffic_limit_mode,
+			data_limit: dataLimitGb !== null ? dataLimitGb * GB_IN_BYTES : null,
+			users_limit: usersLimit,
+			show_user_traffic: serviceAdminLimitForm.show_user_traffic,
+			delete_user_usage_limit_enabled:
+				serviceAdminLimitForm.delete_user_usage_limit_enabled,
+			delete_user_usage_limit:
+				deleteUserUsageLimitMb !== null
+					? deleteUserUsageLimitMb * MB_IN_BYTES
+					: null,
+		});
+		if (saved) {
+			closeServiceAdminLimitEditor();
+		}
+	};
+
+	const resetServiceDeletedUsersUsage = async (link: {
+		id: number;
+		username: string;
+	}) => {
+		if (!selectedService) return;
+		setSavingAdminLimitId(link.id);
+		try {
+			await adminStore.resetDeletedUsersUsage(
+				link.username,
+				selectedService.id,
+			);
+			await servicesStore.fetchServiceDetail(selectedService.id);
+			toast({
+				status: "success",
+				title: t("admins.resetDeletedUsageSuccess"),
+			});
+		} catch (error) {
+			toast({
+				status: "error",
+				title: t("admins.resetDeletedUsageFailed"),
+				description: error instanceof Error ? error.message : undefined,
+			});
+		} finally {
+			setSavingAdminLimitId(null);
+		}
+	};
+
+	const serviceAdminColumns = useMemo<DataTableColumn<ServiceAdmin>[]>(
+		() => [
+			{
+				id: "username",
+				header: t("username"),
+				accessor: "username",
+				isPrimary: true,
+				priority: "primary",
+				width: "180px",
+				minWidth: "160px",
+				maxWidth: "220px",
+				truncate: true,
+				tooltip: true,
+				mobilePriority: 0,
+				mobileMetaLabel: t("username"),
+				cell: (link) => (
+					<Text fontWeight="semibold" dir="ltr" sx={{ unicodeBidi: "isolate" }}>
+						{link.username}
+					</Text>
+				),
+			},
+			{
+				id: "usage",
+				header: t("services.columns.usage"),
+				priority: "high",
+				width: "170px",
+				maxWidth: "190px",
+				mobilePriority: 1,
+				mobileSummary: true,
+				mobileMetaLabel: t("services.columns.usage"),
+				cell: (link) => (
+					<Text
+						fontSize="sm"
+						dir="ltr"
+						sx={{ unicodeBidi: "isolate" }}
+						whiteSpace="nowrap"
+					>
+						{link.traffic_limit_mode === AdminTrafficLimitMode.CreatedTraffic
+							? formatBytes(link.created_traffic)
+							: formatBytes(link.used_traffic)}{" "}
+						/ {formatGigabytes(link.data_limit, t("nodes.unlimited"))}
+					</Text>
+				),
+			},
+			{
+				id: "mode",
+				header: t("admins.trafficMode"),
+				priority: "medium",
+				hideBelow: "xl",
+				width: "150px",
+				maxWidth: "170px",
+				mobilePriority: 2,
+				mobileMetaLabel: t("admins.trafficMode"),
+				cell: (link) => (
+					<Select
+						size="sm"
+						value={link.traffic_limit_mode}
+						disabled={savingAdminLimitId === link.id}
+						onClick={(event) => event.stopPropagation()}
+						onChange={(event) =>
+							saveServiceAdminLimit(link.id, {
+								traffic_limit_mode: event.target.value as AdminTrafficLimitMode,
+							})
+						}
+					>
+						<option value={AdminTrafficLimitMode.UsedTraffic}>
+							{t("nodes.usedTrafficSeries")}
+						</option>
+						<option value={AdminTrafficLimitMode.CreatedTraffic}>
+							{t("myaccount.createdTraffic")}
+						</option>
+					</Select>
+				),
+			},
+			{
+				id: "data_limit",
+				header: t("admins.dataLimit"),
+				priority: "medium",
+				hideBelow: "xl",
+				width: "120px",
+				maxWidth: "140px",
+				mobilePriority: 3,
+				mobileMetaLabel: t("admins.dataLimit"),
+				cell: (link) => (
+					<Input
+						size="sm"
+						type="number"
+						inputMode="decimal"
+						min={0}
+						step={0.01}
+						defaultValue={formatUnitInputValue(link.data_limit)}
+						disabled={savingAdminLimitId === link.id}
+						onClick={(event) => event.stopPropagation()}
+						onInput={(event) => {
+							event.currentTarget.value = sanitizeDecimalInput(
+								event.currentTarget.value,
+							);
+						}}
+						onBlur={(event) => {
+							const dataLimitGb = parseDecimalInput(event.target.value);
+							saveServiceAdminLimit(link.id, {
+								data_limit:
+									dataLimitGb !== null ? dataLimitGb * GB_IN_BYTES : null,
+							});
+						}}
+					/>
+				),
+			},
+			{
+				id: "users_limit",
+				header: t("admins.usersLimit"),
+				priority: "low",
+				hideBelow: "xl",
+				width: "110px",
+				maxWidth: "130px",
+				mobilePriority: 4,
+				mobileMetaLabel: t("admins.usersLimit"),
+				cell: (link) => (
+					<Input
+						size="sm"
+						type="number"
+						inputMode="numeric"
+						min={0}
+						step={1}
+						defaultValue={link.users_limit ?? ""}
+						disabled={savingAdminLimitId === link.id}
+						onClick={(event) => event.stopPropagation()}
+						onInput={(event) => {
+							event.currentTarget.value = sanitizeIntegerInput(
+								event.currentTarget.value,
+							);
+						}}
+						onBlur={(event) =>
+							saveServiceAdminLimit(link.id, {
+								users_limit: parseIntegerInput(event.target.value),
+							})
+						}
+					/>
+				),
+			},
+			{
+				id: "delete_cap",
+				header: t("admins.deleteUserUsageLimit"),
+				priority: "low",
+				hideBelow: "xl",
+				width: "128px",
+				maxWidth: "150px",
+				mobilePriority: 5,
+				mobileMetaLabel: t("admins.deleteUserUsageLimit"),
+				cell: (link) => (
+					<Input
+						size="sm"
+						type="number"
+						inputMode="decimal"
+						min={0}
+						step={0.01}
+						defaultValue={formatUnitInputValue(
+							link.delete_user_usage_limit,
+							MB_IN_BYTES,
+						)}
+						disabled={savingAdminLimitId === link.id}
+						onClick={(event) => event.stopPropagation()}
+						onInput={(event) => {
+							event.currentTarget.value = sanitizeDecimalInput(
+								event.currentTarget.value,
+							);
+						}}
+						onBlur={(event) => {
+							const deleteUserUsageLimitMb = parseDecimalInput(
+								event.target.value,
+							);
+							saveServiceAdminLimit(link.id, {
+								delete_user_usage_limit:
+									deleteUserUsageLimitMb !== null
+										? deleteUserUsageLimitMb * MB_IN_BYTES
+										: null,
+							});
+						}}
+					/>
+				),
+			},
+			{
+				id: "flags",
+				header: t("admins.permissionsTabLabel"),
+				priority: "low",
+				hideBelow: "xl",
+				width: "230px",
+				maxWidth: "260px",
+				mobilePriority: 6,
+				mobileMetaLabel: t("admins.permissionsTabLabel"),
+				cell: (link) => (
+					<HStack spacing={3} justify="center" flexWrap="wrap">
+						<Checkbox
+							size="sm"
+							isChecked={link.show_user_traffic}
+							isDisabled={savingAdminLimitId === link.id}
+							onClick={(event) => event.stopPropagation()}
+							onChange={(event) =>
+								saveServiceAdminLimit(link.id, {
+									show_user_traffic: event.target.checked,
+								})
+							}
+						>
+							{t("admins.showUserTraffic")}
+						</Checkbox>
+						<Checkbox
+							size="sm"
+							isChecked={link.delete_user_usage_limit_enabled}
+							isDisabled={savingAdminLimitId === link.id}
+							onClick={(event) => event.stopPropagation()}
+							onChange={(event) =>
+								saveServiceAdminLimit(link.id, {
+									delete_user_usage_limit_enabled: event.target.checked,
+								})
+							}
+						>
+							{t("admins.deleteUserUsageCap")}
+						</Checkbox>
+					</HStack>
+				),
+			},
+		],
+		[saveServiceAdminLimit, savingAdminLimitId, t],
+	);
+
+	const serviceAdminRowActions = (
+		link: ServiceAdmin,
+	): DataTableRowAction<ServiceAdmin>[] => [
+		{
+			id: "editLimits",
+			label: t("services.editAdminLimits"),
+			icon: <PencilSquareIcon width={16} />,
+			onClick: () => openServiceAdminLimitEditor(link),
+			isDisabled: savingAdminLimitId === link.id,
+		},
+		{
+			id: "resetDeleted",
+			label: t("admins.resetDeletedUsage"),
+			icon: <ArrowPathIcon width={16} />,
+			onClick: () => resetServiceDeletedUsersUsage(link),
+			isDisabled:
+				link.deleted_users_usage <= 0 || savingAdminLimitId === link.id,
+		},
+	];
+
+	const serviceHostColumns = useMemo<DataTableColumn<ServiceHost>[]>(
+		() => [
+			{
+				id: "remark",
+				header: t("nodes.nodeName"),
+				accessor: "remark",
+				isPrimary: true,
+				priority: "primary",
+				width: "220px",
+				maxWidth: "260px",
+				truncate: true,
+				tooltip: true,
+				mobilePriority: 0,
+				mobileMetaLabel: t("nodes.nodeName"),
+				cell: (host) => (
+					<Text fontWeight="semibold" noOfLines={1}>
+						<AppleEmojiText>{host.remark}</AppleEmojiText>
+					</Text>
+				),
+			},
+			{
+				id: "inbound",
+				header: t("inbound"),
+				priority: "high",
+				width: "180px",
+				maxWidth: "220px",
+				truncate: true,
+				tooltip: true,
+				mobilePriority: 1,
+				mobileMetaLabel: t("inbound"),
+				cell: (host) => (
+					<Text fontSize="sm" noOfLines={1}>
+						{host.inbound_protocol.toUpperCase()} - {host.inbound_tag}
+					</Text>
+				),
+			},
+			{
+				id: "address",
+				header: t("nodes.nodeAddress"),
+				accessor: "address",
+				priority: "medium",
+				hideBelow: "xl",
+				width: "170px",
+				maxWidth: "210px",
+				truncate: true,
+				tooltip: true,
+				mobilePriority: 2,
+				mobileMetaLabel: t("nodes.nodeAddress"),
+				cell: (host) => (
+					<Text dir="ltr" sx={{ unicodeBidi: "isolate" }} noOfLines={1}>
+						{host.address || "-"}
+					</Text>
+				),
+			},
+			{
+				id: "port",
+				header: t("port"),
+				accessor: "port",
+				priority: "medium",
+				width: "90px",
+				maxWidth: "110px",
+				mobilePriority: 3,
+				mobileMetaLabel: t("port"),
+				cell: (host) => <Text>{host.port ?? "-"}</Text>,
+			},
+			{
+				id: "sort",
+				header: t("services.sort"),
+				accessor: "sort",
+				priority: "low",
+				hideBelow: "xl",
+				width: "90px",
+				maxWidth: "110px",
+				mobilePriority: 4,
+				mobileMetaLabel: t("services.sort"),
+				cell: (host) => <Badge borderRadius="md">#{host.sort + 1}</Badge>,
+			},
+		],
+		[t],
+	);
+
+	if (!getUserIsSuccess) {
+		return (
+			<Flex justify="center" align="center" h="full" py={10}>
+				<Spinner />
+			</Flex>
+		);
+	}
+
+	if (!canManageServices) {
+		return (
+			<VStack spacing={3} align="stretch">
+				<PageHeader title={t("services.title")} />
+				<Text fontSize="sm" color="panel.textMuted">
+					{t("services.noPermission")}
+				</Text>
+			</VStack>
+		);
+	}
+
+	return (
+		<VStack spacing={4} align="stretch">
+			<PageHeader
+				title={t("services.title")}
+				description={t("services.subtitle")}
+			/>
+
+			<ResourceListCard
+				title={t("services.listHeader")}
+				summaryItems={serviceSummaryItems}
+				actions={
+					<Button
+						leftIcon={<PlusIcon width={18} />}
+						colorScheme="primary"
+						onClick={openCreateDialog}
+						size="sm"
+						h="36px"
+						px={3}
+						borderRadius="4px"
+					>
+						{t("services.addService")}
+					</Button>
+				}
+			/>
+
+			<DataTable
+				ariaLabel={t("services.title")}
+				data={servicesStore.services}
+				columns={serviceColumns}
+				getRowId={(service) => String(service.id)}
+				isLoading={servicesStore.isLoading}
+				loadingRows={5}
+				emptyState={
+					<Box textAlign="center">
+						<Text fontWeight="semibold">
+							{t("services.noServicesAvailable")}
+						</Text>
+						<Text fontSize="sm" color={labelColor} mt={1}>
+							{t("services.emptyHint")}
+						</Text>
+					</Box>
+				}
+				rowActions={serviceRowActions}
+				actionsDisplay="menu"
+				actionsPlacement="end"
+				actionsColumnWidth="60px"
+				showActionsOnHover
+				onRowClick={(service) => {
+					void openServiceDetail(service.id, "admins");
+				}}
+				mobileBreakpoint="lg"
+				tableProps={{
+					w: "full",
+					sx: {
+						tableLayout: "fixed",
+						"& th, & td": {
+							px: { base: 2, xl: 2.5 },
+							py: 2.5,
+							verticalAlign: "middle",
+						},
+					},
+				}}
+			/>
+
+			{selectedService && (
+				<Stack spacing={3}>
+					<PageHeader
+						title={
+							<Text as="span" fontSize="md" fontWeight="semibold" noOfLines={1}>
+								{selectedService.name}
+							</Text>
+						}
+						description={
+							selectedService.description ? (
+								<Text as="span" noOfLines={2}>
+									{selectedService.description}
+								</Text>
+							) : undefined
+						}
+						actions={
+							<Badge colorScheme="primary" borderRadius="md">
+								{t("services.usersCount", {
+									count: selectedService.user_count,
+								})}
+							</Badge>
+						}
+					/>
+					<TabSystem
+						tabs={[
+							{
+								label: t("services.admins"),
+								value: "admins",
+								isActive: activeServiceTab === "admins",
+								onClick: () => setActiveServiceTab("admins"),
+							},
+							{
+								label: t("services.hosts"),
+								value: "hosts",
+								isActive: activeServiceTab === "hosts",
+								onClick: () => setActiveServiceTab("hosts"),
+							},
+						]}
+					/>
+					{activeServiceTab === "admins" ? (
+						<DataTable
+							containerProps={{ mt: 3 }}
+							ariaLabel={t("services.admins")}
+							data={selectedService.admins}
+							columns={serviceAdminColumns}
+							getRowId={(link) => String(link.id)}
+							emptyState={
+								<Text fontSize="sm" color="panel.textMuted" textAlign="center">
+									{t("services.noAdmins")}
+								</Text>
+							}
+							rowActions={serviceAdminRowActions}
+							actionsDisplay="menu"
+							actionsPlacement="end"
+							actionsColumnWidth="60px"
+							showActionsOnHover
+							mobileBreakpoint="lg"
+							tableProps={{
+								w: "full",
+								sx: {
+									tableLayout: "fixed",
+									"& th, & td": {
+										px: { base: 2, xl: 2.5 },
+										py: 2.5,
+										verticalAlign: "middle",
+									},
+								},
+							}}
+						/>
+					) : (
+						<DataTable
+							containerProps={{ mt: 3 }}
+							ariaLabel={t("services.hosts")}
+							data={selectedService.hosts}
+							columns={serviceHostColumns}
+							getRowId={(host) => String(host.id)}
+							emptyState={
+								<Text fontSize="sm" color="panel.textMuted" textAlign="center">
+									{t("services.noHosts")}
+								</Text>
+							}
+							mobileBreakpoint="lg"
+							tableProps={{
+								w: "full",
+								sx: {
+									tableLayout: "fixed",
+									"& th, & td": {
+										px: { base: 2, xl: 2.5 },
+										py: 2.5,
+										verticalAlign: "middle",
+									},
+								},
+							}}
+						/>
+					)}
+				</Stack>
+			)}
+
+			<AppDialog
+				isOpen={Boolean(editingServiceAdminLimit)}
+				onClose={closeServiceAdminLimitEditor}
+				size="lg"
+				scrollBehavior="inside"
+				isCentered
+				title={`${t("services.editAdminLimits")}${
+					editingServiceAdminLimit
+						? ` - ${editingServiceAdminLimit.username}`
+						: ""
+				}`}
+				overlayProps={{ bg: "blackAlpha.300", backdropFilter: "blur(6px)" }}
+				footerProps={{ gap: 3 }}
+				footer={
+					<>
+						<Button variant="ghost" onClick={closeServiceAdminLimitEditor}>
+							{t("cancel")}
+						</Button>
+						<Button
+							colorScheme="primary"
+							onClick={submitServiceAdminLimitEditor}
+							isLoading={
+								editingServiceAdminLimit
+									? savingAdminLimitId === editingServiceAdminLimit.id
+									: false
+							}
+						>
+							{t("save")}
+						</Button>
+					</>
+				}
+			>
+				<Stack spacing={4}>
+					<FormControl>
+						<FormLabel>{t("admins.trafficMode")}</FormLabel>
+						<Select
+							value={serviceAdminLimitForm.traffic_limit_mode}
+							onChange={(event) =>
+								setServiceAdminLimitForm((current) => ({
+									...current,
+									traffic_limit_mode: event.target
+										.value as AdminTrafficLimitMode,
+								}))
+							}
+						>
+							<option value={AdminTrafficLimitMode.UsedTraffic}>
+								{t("nodes.usedTrafficSeries")}
+							</option>
+							<option value={AdminTrafficLimitMode.CreatedTraffic}>
+								{t("myaccount.createdTraffic")}
+							</option>
+						</Select>
+					</FormControl>
+					<SimpleGrid columns={{ base: 1, md: 2 }} spacing={3}>
+						<FormControl>
+							<FormLabel>{t("admins.dataLimit")}</FormLabel>
+							<Input
+								type="number"
+								inputMode="decimal"
+								min={0}
+								step={0.01}
+								value={serviceAdminLimitForm.data_limit_gb}
+								placeholder={t("admins.dataLimitPlaceholder")}
+								onChange={(event) =>
+									setServiceAdminLimitForm((current) => ({
+										...current,
+										data_limit_gb: sanitizeDecimalInput(event.target.value),
+									}))
+								}
+							/>
+							<FormHelperText>{t("admins.dataLimitHint")}</FormHelperText>
+						</FormControl>
+						<FormControl>
+							<FormLabel>{t("admins.usersLimit")}</FormLabel>
+							<Input
+								type="number"
+								inputMode="numeric"
+								min={0}
+								step={1}
+								value={serviceAdminLimitForm.users_limit}
+								placeholder={t("admins.usersLimitPlaceholder")}
+								onChange={(event) =>
+									setServiceAdminLimitForm((current) => ({
+										...current,
+										users_limit: sanitizeIntegerInput(event.target.value),
+									}))
+								}
+							/>
+							<FormHelperText>{t("admins.usersLimitHint")}</FormHelperText>
+						</FormControl>
+					</SimpleGrid>
+					<Stack spacing={3}>
+						<Checkbox
+							isChecked={serviceAdminLimitForm.show_user_traffic}
+							onChange={(event) =>
+								setServiceAdminLimitForm((current) => ({
+									...current,
+									show_user_traffic: event.target.checked,
+								}))
+							}
+						>
+							{t("admins.showUserTraffic")}
+						</Checkbox>
+						<Checkbox
+							isChecked={serviceAdminLimitForm.delete_user_usage_limit_enabled}
+							onChange={(event) =>
+								setServiceAdminLimitForm((current) => ({
+									...current,
+									delete_user_usage_limit_enabled: event.target.checked,
+								}))
+							}
+						>
+							{t("admins.deleteUserUsageCap")}
+						</Checkbox>
+						<FormControl
+							isDisabled={
+								!serviceAdminLimitForm.delete_user_usage_limit_enabled
+							}
+						>
+							<FormLabel>{t("admins.deleteUserUsageLimit")}</FormLabel>
+							<Input
+								type="number"
+								inputMode="decimal"
+								min={0}
+								step={0.01}
+								value={serviceAdminLimitForm.delete_user_usage_limit_mb}
+								onChange={(event) =>
+									setServiceAdminLimitForm((current) => ({
+										...current,
+										delete_user_usage_limit_mb: sanitizeDecimalInput(
+											event.target.value,
+										),
+									}))
+								}
+							/>
+						</FormControl>
+					</Stack>
+				</Stack>
+			</AppDialog>
+
+			<ConfirmDialog
+				isOpen={isResetDialogOpen}
+				onClose={closeResetDialog}
+				onConfirm={confirmResetUsage}
+				title={t("services.resetUsage")}
+				description={t("services.resetUsageConfirm", {
+					name: resetTargetName ?? t("services.thisService"),
+				})}
+				confirmLabel={t("services.resetUsage")}
+				colorScheme="primary"
+				isLoading={isResetting}
+				isConfirmDisabled={resetServiceId == null}
+			/>
+
+			<AppDialog
+				isOpen={isDeleteDialogOpen}
+				onClose={handleCloseDeleteDialog}
+				size="lg"
+				title={`${t("services.deleteDialogTitle")}${
+					servicePendingDelete ? ` – ${servicePendingDelete.name}` : ""
+				}`}
+				overlayProps={{ bg: "blackAlpha.300", backdropFilter: "blur(6px)" }}
+				footerProps={{ gap: 3 }}
+				footer={
+					<>
+						<Button variant="ghost" onClick={handleCloseDeleteDialog}>
+							{t("cancel")}
+						</Button>
+						<Button
+							colorScheme="red"
+							onClick={confirmDeleteService}
+							isLoading={isDeleting}
+							isDisabled={
+								!servicePendingDelete ||
+								(deleteMode === "transfer_users" &&
+									servicePendingDelete.user_count > 0 &&
+									!targetServiceId)
+							}
+						>
+							{t("delete")}
+						</Button>
+					</>
+				}
+			>
+				{servicePendingDelete ? (
+					<VStack align="stretch" spacing={4}>
+						<Text>
+							{t("services.deleteDialogDescription", {
+								name: servicePendingDelete.name,
+							})}
+						</Text>
+						{servicePendingDelete.admin_ids.length > 0 ? (
+							<Checkbox
+								isChecked={unlinkAdmins}
+								onChange={(event) => setUnlinkAdmins(event.target.checked)}
+							>
+								{t("services.unlinkAdminsOption")}
+							</Checkbox>
+						) : (
+							<Text fontSize="sm" color="gray.500">
+								{t("services.noAdminsLinked")}
+							</Text>
+						)}
+						{servicePendingDelete.user_count > 0 ? (
+							<VStack align="stretch" spacing={3}>
+								<Text fontWeight="semibold">
+									{t("services.userDeletePrompt", {
+										count: servicePendingDelete.user_count,
+									})}
+								</Text>
+								<RadioGroup
+									value={deleteMode}
+									onChange={(value) =>
+										setDeleteMode(value as "delete_users" | "transfer_users")
+									}
+								>
+									<Stack align="flex-start" spacing={2}>
+										<Radio value="delete_users">
+											{t("services.deleteUsersOption")}
+										</Radio>
+										<Radio value="transfer_users">
+											{t("services.transferUsersOption")}
+										</Radio>
+									</Stack>
+								</RadioGroup>
+								{deleteMode === "transfer_users" && (
+									<FormControl>
+										<FormLabel>{t("services.selectTargetService")}</FormLabel>
+										<Select
+											placeholder={t("services.selectServicePlaceholder")}
+											value={targetServiceId?.toString() ?? ""}
+											onChange={(
+												event: React.ChangeEvent<HTMLSelectElement>,
+											) => {
+												const value = event.target.value;
+												if (!value) {
+													setTargetServiceId(null);
+													return;
+												}
+												setTargetServiceId(Number(value));
+											}}
+										>
+											{otherServices.map((service) => (
+												<option key={service.id} value={service.id}>
+													{service.name}
+												</option>
+											))}
+										</Select>
+										<FormHelperText>
+											{t("services.transferUsersHint")}
+										</FormHelperText>
+									</FormControl>
+								)}
+							</VStack>
+						) : (
+							<Alert status="info" borderRadius="md">
+								<AlertIcon />
+								<AlertDescription>
+									{t("services.noUsersLinked")}
+								</AlertDescription>
+							</Alert>
+						)}
+					</VStack>
+				) : (
+					<Text>{t("services.loading")}</Text>
+				)}
+			</AppDialog>
+
+			{dialogDisclosure.isOpen && (
+				<ServiceDialog
+					isOpen={dialogDisclosure.isOpen}
+					onClose={dialogDisclosure.onClose}
+					onSubmit={handleSubmit}
+					isSaving={servicesStore.isSaving}
+					allHosts={hostOptions}
+					allAdmins={adminOptions}
+					initialService={editingService ?? undefined}
+					inbounds={inbounds}
+					refreshInbounds={fetchInbounds}
+					refreshHosts={hostsStore.fetchHosts}
+				/>
+			)}
+		</VStack>
+	);
+};
+
+export default ServicesPage;
