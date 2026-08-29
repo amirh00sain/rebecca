@@ -176,16 +176,6 @@ func includeDBUsers(ctx context.Context, db *sql.DB, raw map[string]any) error {
 	if err != nil {
 		return err
 	}
-	logging.Infof(logging.ComponentRuntime, "[Xray] includeDBUsers: loaded %d users, %d service-tag mappings, inbounds=%v",
-		len(users), len(serviceTags), func() []string {
-			var tags []string
-			for proto := range inboundsByProtocol {
-				for _, inb := range inboundsByProtocol[proto] {
-					tags = append(tags, proto+":"+stringValue(inb["tag"]))
-				}
-			}
-			return tags
-		}())
 
 	// Get UUID masks for Shadowsocks 2022
 	masks, err := loadUUIDMasks(ctx, db)
@@ -205,23 +195,19 @@ func includeDBUsers(ctx context.Context, db *sql.DB, raw map[string]any) error {
 
 	for _, u := range users {
 		if u.ServiceID <= 0 {
-			logging.Warnf(logging.ComponentRuntime, "[Xray] user %s (id=%d) skipped: no service_id", u.Username, u.ID)
 			continue
 		}
 		targets := inboundsByProtocol[u.Protocol]
-		if len(targets) == 0 {
-			logging.Warnf(logging.ComponentRuntime, "[Xray] user %s (id=%d) skipped: no inbound for protocol %s", u.Username, u.ID, u.Protocol)
-			continue
-		}
 		for _, inbound := range targets {
 			tag := stringValue(inbound["tag"])
-			if !serviceTags[u.ServiceID][tag] {
-				logging.Warnf(logging.ComponentRuntime, "[Xray] user %s (id=%d) skipped: service %d has no host linked to inbound tag %q", u.Username, u.ID, u.ServiceID, tag)
+			// If the service has hosts linked, only inject into linked inbounds.
+			// If no hosts are linked at all (fresh deployment), inject into
+			// every matching inbound so the server actually works.
+			if len(serviceTags[u.ServiceID]) > 0 && !serviceTags[u.ServiceID][tag] {
 				continue
 			}
 			settings, err := user.RuntimeProxySettings(u.Settings, u.Protocol, u.CredentialKey, u.Flow, masks)
 			if err != nil {
-				logging.Warnf(logging.ComponentRuntime, "[Xray] user %s (id=%d) skipped: RuntimeProxySettings error: %v", u.Username, u.ID, err)
 				continue
 			}
 			if u.Protocol == "shadowsocks" {
@@ -230,7 +216,6 @@ func includeDBUsers(ctx context.Context, db *sql.DB, raw map[string]any) error {
 			settings["email"] = fmt.Sprintf("%d.%s", u.ID, u.Username)
 			clients := ensureMap(inbound, "settings")["clients"].([]any)
 			ensureMap(inbound, "settings")["clients"] = append(clients, settings)
-			logging.Infof(logging.ComponentRuntime, "[Xray] injected user %s (id=%d) protocol=%s → inbound %q", u.Username, u.ID, u.Protocol, tag)
 		}
 	}
 	return nil
