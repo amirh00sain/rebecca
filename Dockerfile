@@ -84,8 +84,12 @@ COPY --from=xray-download /opt/xray-out/xray /usr/local/bin/xray
 COPY --from=xray-download /opt/xray-out/geoip.dat /usr/local/share/xray/geoip.dat
 COPY --from=xray-download /opt/xray-out/geosite.dat /usr/local/share/xray/geosite.dat
 
-# Data/config dirs (config.json generated at runtime — never baked into the image)
-RUN mkdir -p /var/lib/rebecca/xray-core \
+# Persistent data/config dirs (config.json generated at runtime — never baked into the image)
+RUN mkdir -p \
+        /var/lib/rebecca \
+        /var/lib/rebecca/xray-core \
+        /var/lib/rebecca/data \
+        /var/lib/rebecca/config \
     && ln -sf /usr/local/bin/xray /var/lib/rebecca/xray-core/xray \
     && ln -sf /usr/local/share/xray/geoip.dat /var/lib/rebecca/xray-core/geoip.dat \
     && ln -sf /usr/local/share/xray/geosite.dat /var/lib/rebecca/xray-core/geosite.dat
