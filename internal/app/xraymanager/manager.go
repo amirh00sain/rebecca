@@ -298,7 +298,6 @@ func (m *xrayManager) startProcess() error {
 	m.startedAt = time.Now()
 	m.lastError = ""
 	m.lastExitMessage = ""
-	m.restartCount = 0
 	m.mu.Unlock()
 
 	logging.Infof(logging.ComponentRuntime, "[Xray] process started pid=%d", m.pid)
