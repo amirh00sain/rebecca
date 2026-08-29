@@ -250,12 +250,16 @@ func loadRuntimeUsersForProtocols(ctx context.Context, db *sql.DB, protocols []s
 		placeholders[i] = "?"
 		args[i] = p
 	}
+	// A user may have a proxy credential for each protocol in the proxies table.
+	// Join users <-> proxies so we read the protocol (p.type) and settings (p.settings)
+	// from where they actually live, rather than inventing a u.protocol column.
 	query := fmt.Sprintf(`
 SELECT u.id, u.username, COALESCE(u.credential_key, ''), COALESCE(u.flow, ''),
-       COALESCE(u.service_id, 0), u.protocol, u.settings
+       COALESCE(u.service_id, 0), p.type, p.settings
 FROM users u
+JOIN proxies p ON p.user_id = u.id
 WHERE u.status = 'active'
-  AND u.protocol IN (%s)
+  AND p.type IN (%s)
   AND u.service_id IS NOT NULL AND u.service_id > 0
 ORDER BY u.id`, strings.Join(placeholders, ","))
 

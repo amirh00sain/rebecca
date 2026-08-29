@@ -50,9 +50,26 @@ func Open(databaseURL string) (Pool, error) {
 	if dialect == "sqlite" {
 		// WAL permits readers while another connection is writing. A single
 		// connection turns any slow write into a queue for the whole panel.
-		sqlDB.SetMaxOpenConns(8)
+		sqlDB.SetMaxOpenConns(4)
 		sqlDB.SetMaxIdleConns(4)
 		sqlDB.SetConnMaxIdleTime(30 * time.Second)
+		// Apply SQLite pragmas on every connection. The DSN parameters above
+		// (_busy_timeout, _journal_mode, _synchronous) are not reliably honored by
+		// the modernc.org/sqlite driver, so we set them explicitly here. Without a
+		// busy timeout, concurrent background workers (node usage, telegram backup,
+		// operations queue) contend and surface as SQLITE_BUSY (database is locked).
+		if _, err := sqlDB.ExecContext(context.Background(), `PRAGMA busy_timeout=30000`); err != nil {
+			_ = sqlDB.Close()
+			return Pool{}, fmt.Errorf("set sqlite busy_timeout: %w", err)
+		}
+		if _, err := sqlDB.ExecContext(context.Background(), `PRAGMA journal_mode=WAL`); err != nil {
+			_ = sqlDB.Close()
+			return Pool{}, fmt.Errorf("set sqlite journal_mode: %w", err)
+		}
+		if _, err := sqlDB.ExecContext(context.Background(), `PRAGMA synchronous=NORMAL`); err != nil {
+			_ = sqlDB.Close()
+			return Pool{}, fmt.Errorf("set sqlite synchronous: %w", err)
+		}
 	} else {
 		sqlDB.SetMaxOpenConns(64)
 		sqlDB.SetMaxIdleConns(16)

@@ -73,16 +73,17 @@ func New(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Bootstrap admin before any other initialization
-	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer bootstrapCancel()
-	if err := ensureBootstrapAdmin(bootstrapCtx, pool.DB); err != nil {
-		logging.Warnf(logging.ComponentRuntime, "[Bootstrap] admin bootstrap skipped: %v", err)
-	}
 	migrationCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	if err := migrations.RunMigrations(migrationCtx, pool.DB, pool.Dialect); err != nil {
 		return nil, fmt.Errorf("run database migrations: %w", err)
+	}
+	// Bootstrap admin after migrations: ensureBootstrapAdmin needs the admins
+	// table, which only exists once migrations have created the schema.
+	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer bootstrapCancel()
+	if err := ensureBootstrapAdmin(bootstrapCtx, pool.DB); err != nil {
+		logging.Warnf(logging.ComponentRuntime, "[Bootstrap] admin bootstrap skipped: %v", err)
 	}
 	if err := checkDatabaseIntegrity(migrationCtx, pool.DB); err != nil {
 		return nil, fmt.Errorf("database integrity check: %w", err)

@@ -15,7 +15,7 @@ import (
 
 const (
 	defaultAdminUsername = "admin1"
-	defaultAdminPassword = "admin"
+	defaultAdminPassword = "admin123"
 	minPasswordLength   = 6
 	envAdminUsername     = "REBECCA_ADMIN_USERNAME"
 	envAdminPassword     = "REBECCA_ADMIN_PASSWORD"
