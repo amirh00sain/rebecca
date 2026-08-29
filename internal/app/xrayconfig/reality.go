@@ -1,9 +1,11 @@
 package xrayconfig
 
 import (
+	crypto_rand "crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -68,6 +70,21 @@ func decodeBase64Key(value string) ([]byte, error) {
 		return raw, nil
 	}
 	return nil, errors.New("Reality private key is not valid Base64 or hex")
+}
+
+// GenerateRealityKeypair creates a fresh x25519 REALITY keypair.
+// Returns (normalizedPrivateKey, publicKey) both base64.RawURL-encoded.
+func GenerateRealityKeypair() (string, string, error) {
+	privateKey := make([]byte, curve25519.ScalarSize)
+	if _, err := crypto_rand.Read(privateKey); err != nil {
+		return "", "", fmt.Errorf("generate REALITY private key: %w", err)
+	}
+	publicKey, err := curve25519.X25519(privateKey, curve25519.Basepoint)
+	if err != nil {
+		return "", "", fmt.Errorf("derive REALITY public key: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(privateKey),
+		base64.RawURLEncoding.EncodeToString(publicKey), nil
 }
 
 func padBase64(value string) string {

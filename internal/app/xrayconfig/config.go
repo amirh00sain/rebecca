@@ -51,7 +51,9 @@ var (
 		"hysteria":    {},
 	}
 	realityShortIDPattern  = regexp.MustCompile(`^[0-9a-fA-F]{2,16}$`)
-	xPaddingBytesPattern   = regexp.MustCompile(`^\d+(-\d+)?$`)
+	// xPaddingBytes accepts an optional leading "+" (Xray-core strips it),
+	// so both "100-1000" and "+100-1000" are valid.
+	xPaddingBytesPattern   = regexp.MustCompile(`^\+?\d+(-\d+)?$`)
 	xrayCoreVersionPattern = regexp.MustCompile(`(?:^|[^0-9])(\d+)\.(\d+)\.(\d+)(?:$|[^0-9])`)
 )
 
@@ -346,6 +348,7 @@ func validateNetworkSettings(tag string, network string, settings map[string]any
 			return fmt.Errorf("invalid inbound %q: %s path must start with /", tag, network)
 		}
 		if padding := strings.TrimSpace(stringValue(settings["xPaddingBytes"])); padding != "" {
+			padding = strings.TrimPrefix(padding, "+")
 			if !xPaddingBytesPattern.MatchString(padding) {
 				return fmt.Errorf("invalid inbound %q: xPaddingBytes must look like 100 or 100-1000", tag)
 			}

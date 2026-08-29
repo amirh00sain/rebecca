@@ -382,6 +382,55 @@ func TestRealityInboundAcceptsSettingsShortID(t *testing.T) {
 	}
 }
 
+func TestRealityInboundAutoGeneratesKeypairAndDefaultsSpiderX(t *testing.T) {
+	// When the caller provides no privateKey / spiderX, normalizeRealitySettings
+	// must generate a fresh x25519 keypair and default spiderX to "/".
+	inbound := map[string]any{
+		"tag":      "reality-auto",
+		"port":     443,
+		"protocol": "vless",
+		"streamSettings": map[string]any{
+			"network":  "tcp",
+			"security": "reality",
+			"realitySettings": map[string]any{
+				"target":      "example.com:443",
+				"serverNames": []any{"example.com"},
+				"shortIds":    []any{"abcd"},
+			},
+		},
+	}
+	if err := normalizeRealitySettings(inbound); err != nil {
+		t.Fatalf("normalizeRealitySettings() error = %v", err)
+	}
+	reality := inbound["streamSettings"].(map[string]any)["realitySettings"].(map[string]any)
+	priv := stringValue(reality["privateKey"])
+	if priv == "" {
+		t.Fatal("expected auto-generated privateKey")
+	}
+	if _, err := base64.RawURLEncoding.DecodeString(priv); err != nil {
+		t.Fatalf("privateKey is not base64.RawURL: %v", err)
+	}
+	pub := stringValue(reality["publicKey"])
+	if pub == "" {
+		t.Fatal("expected derived publicKey")
+	}
+	if _, err := base64.RawURLEncoding.DecodeString(pub); err != nil {
+		t.Fatalf("publicKey is not base64.RawURL: %v", err)
+	}
+	if stringValue(reality["spiderX"]) != "/" {
+		t.Fatalf("expected spiderX default of '/', got %q", reality["spiderX"])
+	}
+
+	// Parsing through Config.validateInbound should also succeed (the keypair
+	// satisfies the 32-byte + public-key derivation checks).
+	cfg := testConfig()
+	cfg["inbounds"] = []any{deepCopyMap(inbound)}
+	_, err := Parse(cfg, Options{})
+	if err != nil {
+		t.Fatalf("Parse() with auto-generated keys error = %v", err)
+	}
+}
+
 func TestParseRejectsInvalidExecutableInbound(t *testing.T) {
 	cases := []struct {
 		name string
@@ -423,7 +472,7 @@ func TestParseRejectsInvalidExecutableInbound(t *testing.T) {
 				inbound := cfg["inbounds"].([]any)[0].(map[string]any)
 				stream := inbound["streamSettings"].(map[string]any)
 				stream["network"] = "xhttp"
-				stream["xhttpSettings"] = map[string]any{"path": "/x", "xPaddingBytes": "+100-1000"}
+				stream["xhttpSettings"] = map[string]any{"path": "/x", "xPaddingBytes": "100-50"}
 			},
 			want: "xPaddingBytes",
 		},

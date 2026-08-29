@@ -569,15 +569,38 @@ func normalizeRealitySettings(inbound map[string]any) error {
 		reality = make(map[string]any)
 		stream["realitySettings"] = reality
 	}
-	if privateKey := strings.TrimSpace(stringValue(reality["privateKey"])); privateKey != "" {
+
+	// REALITY requires a private/public keypair. If the caller did not supply
+	// one, generate a fresh x25519 keypair so the inbound is always usable and
+	// the subscription link's pbk matches the server's private key.
+	privateKey := strings.TrimSpace(stringValue(reality["privateKey"]))
+	if privateKey == "" {
+		generatedPriv, generatedPub, err := GenerateRealityKeypair()
+		if err != nil {
+			return err
+		}
+		reality["privateKey"] = generatedPriv
+		reality["publicKey"] = generatedPub
+	} else {
 		normalized, err := normalizeRealityPrivateKey(privateKey)
 		if err != nil {
 			return err
 		}
 		reality["privateKey"] = normalized
+		// Derive and persist the public key so the subscription link carries a
+		// pbk that is guaranteed to match the stored private key.
+		if pub, err := DeriveRealityPublicKey(normalized); err == nil {
+			reality["publicKey"] = pub
+		}
 	}
+
 	if value, ok := reality["shortIds"]; ok {
 		reality["shortIds"] = normalizeShortIDs(value)
+	}
+
+	// spiderX defaults to "/" — an empty value breaks the outbound link.
+	if spx := strings.TrimSpace(stringValue(reality["spiderX"])); spx == "" {
+		reality["spiderX"] = "/"
 	}
 	inbound["streamSettings"] = stream
 	return nil
