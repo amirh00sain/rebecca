@@ -28,16 +28,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 
 WORKDIR /src
 COPY tutorials ./tutorials
-RUN hugo --source ./tutorials --destination /out --cleanDestinationDir --gc --minify
+RUN cd /src/tutorials && hugo --destination /out --cleanDestinationDir --gc --minify
 
 # ---- Xray-core download stage ----
 # Xray binary is downloaded at build time with arch detection + checksum.
 # Configurable via build args: XRAY_CORE_VERSION, XRAY_ARCH
 FROM golang:1.25-bookworm AS xray-download
 
-ARG XRAY_CORE_VERSION=v26.7.11
+ARG XRAY_CORE_VERSION=v26.3.27
 ARG TARGETARCH
-ARG TARGETPLATFORM
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \

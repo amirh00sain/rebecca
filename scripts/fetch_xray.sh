@@ -18,6 +18,20 @@ RELEASE_TAG="${1:?Usage: fetch_xray.sh <release_tag> <arch> <output_dir>}"
 ARCH="${2:?Usage: fetch_xray.sh <release_tag> <arch> <output_dir>}"
 OUTPUT_DIR="${3:?Usage: fetch_xray.sh <release_tag> <arch> <output_dir>}"
 
+# Map common Docker buildx TARGETARCH values to Xray release file suffixes.
+# Xray zip files are named Xray-linux-<arch>.zip where <arch> is one of:
+#   64, arm64-v8a, arm32-v7a, arm32-v6, arm32-v5, arm64-sse3?? (n/a), s390x
+case "${ARCH}" in
+    amd64|x86_64)   ARCH="64" ;;
+    arm64)          ARCH="arm64-v8a" ;;
+    arm)            ARCH="arm32-v7a" ;;
+    arm/v5)         ARCH="arm32-v5" ;;
+    arm/v6|armv6l)  ARCH="arm32-v6" ;;
+    arm/v7|armv7l)  ARCH="arm32-v7a" ;;
+    s390x)          ARCH="s390x" ;;
+    *) echo "[fetch_xray] ERROR: unsupported architecture '${ARCH}'" >&2; exit 1 ;;
+esac
+
 DOWNLOAD_URL="https://github.com/XTLS/Xray-core/releases/download/${RELEASE_TAG}/Xray-linux-${ARCH}.zip"
 CHECKSUM_URL="https://github.com/XTLS/Xray-core/releases/download/${RELEASE_TAG}/Xray-linux-${ARCH}.zip.sha256"
 
