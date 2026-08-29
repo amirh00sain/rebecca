@@ -1,12 +1,15 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
+	"github.com/rebeccapanel/rebecca/internal/app/logging"
 	"github.com/rebeccapanel/rebecca/internal/app/xrayconfig"
 )
 
@@ -42,6 +45,8 @@ func (s *Server) handleInboundsRoot(w http.ResponseWriter, r *http.Request) {
 			writeInboundError(w, err)
 			return
 		}
+		// Reload local Xray so the new inbound's port is actually listened on.
+		go s.applyLocalXrayConfig()
 		writeJSON(w, http.StatusOK, result.Inbound)
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -90,6 +95,8 @@ func (s *Server) handleInboundPath(w http.ResponseWriter, r *http.Request) {
 			writeInboundError(w, err)
 			return
 		}
+		// Reload local Xray so port/protocol changes take effect.
+		go s.applyLocalXrayConfig()
 		writeJSON(w, http.StatusOK, result.Inbound)
 	case http.MethodDelete:
 		result, err := s.configRepo.DeleteInbound(r.Context(), tag)
@@ -97,9 +104,40 @@ func (s *Server) handleInboundPath(w http.ResponseWriter, r *http.Request) {
 			writeInboundError(w, err)
 			return
 		}
+		// Reload local Xray so the removed inbound's port is released.
+		go s.applyLocalXrayConfig()
 		writeJSON(w, http.StatusOK, map[string]any{"detail": result.Detail})
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+// applyLocalXrayConfig regenerates the Xray config.json, then starts or
+// restarts the local Xray process so the mutation takes effect. This is a
+// best-effort side effect: failure is logged but never returned to the caller
+// (the DB commit is the authoritative write).
+func (s *Server) applyLocalXrayConfig() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	mgr := s.xrayManager
+	if mgr == nil || !mgr.IsInstalled() {
+		logging.Infof(logging.ComponentRuntime, "[Xray] not installed; skipping config apply after inbound mutation")
+		return
+	}
+	if err := mgr.ApplyConfig(ctx); err != nil {
+		logging.Errorf(logging.ComponentRuntime, "[Xray] config apply failed after inbound mutation: %v", err)
+		return
+	}
+	status := mgr.Status()
+	if status.Running {
+		if err := mgr.Restart(ctx); err != nil {
+			logging.Errorf(logging.ComponentRuntime, "[Xray] restart failed after inbound mutation: %v", err)
+		}
+	} else {
+		// Xray hasn't been started yet (or crashed too many times) — start it now.
+		if err := mgr.Start(ctx); err != nil {
+			logging.Errorf(logging.ComponentRuntime, "[Xray] start failed after inbound mutation: %v", err)
+		}
 	}
 }
 
