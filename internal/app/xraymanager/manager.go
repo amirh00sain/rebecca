@@ -27,7 +27,7 @@ const (
 	defaultXrayDir        = "xray-core"
 	defaultXrayBinary     = "xray"
 	defaultXrayConfigName = "config.json"
-	localXrayAPIPort      = 8080
+	localXrayAPIPort      = 10085
 	maxLogLines           = 500
 	maxRestartBackoff     = 60 * time.Second
 	initialRestartBackoff = 1 * time.Second
@@ -483,6 +483,9 @@ func (m *xrayManager) streamLogs(source string, r io.Reader) {
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		line := scanner.Text()
+		// Mirror to the panel log so Railway/Docker logs show Xray's real error
+		// (e.g. invalid config) instead of only a generic "exit code=255".
+		logging.Infof(logging.ComponentRuntime, "[Xray][%s] %s", source, line)
 		m.appendLog(fmt.Sprintf("[%s] %s", source, line))
 	}
 }
