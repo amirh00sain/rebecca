@@ -1,0 +1,883 @@
+{
+  "links": {
+    "dd265a54-f1d4-0554-2e59-1e237dcb450c": {
+      "label": "لینک پیش‌فرض",
+      "limit_bytes": 0,
+      "used_bytes": 0,
+      "created_at": "2026-08-23T15:28:13.668649",
+      "active": true,
+      "expires_at": null,
+      "note": "",
+      "is_default": true,
+      "sub_id": null,
+      "protocol": "vless-ws"
+    },
+    "df1bd011-d8b7-40da-89f6-c0d9d0c567e5": {
+      "label": "revtest",
+      "limit_bytes": 10737418240,
+      "used_bytes": 0,
+      "created_at": "2026-08-23T18:27:47.317575",
+      "active": true,
+      "expires_at": null,
+      "note": "لینک کاربر revtest",
+      "is_default": false,
+      "sub_id": null,
+      "protocol": "vless-ws",
+      "transport_type": "ws",
+      "xhttp_settings": {},
+      "path": "ws/df1bd011-d8b7-40da-89f6-c0d9d0c567e5",
+      "user_id": "5299ff19215a"
+    }
+  },
+  "users": {
+    "5299ff19215a": {
+      "username": "revtest",
+      "password_hash": "9c3e5010b46c083f36dfd7fff5f7b248de325b2acb699094a682a35b07c49dbf",
+      "protocol": "vless",
+      "traffic_limit_bytes": 10737418240,
+      "traffic_used_bytes": 0,
+      "expire_at": null,
+      "concurrent_connections": 3,
+      "created_at": "2026-08-23T18:27:47.317560",
+      "status": "active",
+      "server": "IR-Tehran-01",
+      "config_uuid": "df1bd011-d8b7-40da-89f6-c0d9d0c567e5",
+      "subscription_uuid": "OuGbbiW39rkd3814KK-qPA",
+      "sni": "",
+      "proxy_ip": "",
+      "proxy_country": "",
+      "proxy_ips": [],
+      "proxy_countries": [],
+      "proxy_ip_enabled": false,
+      "custom_ip_type": "",
+      "custom_ip_inbounds": {
+        "cf": [],
+        "railway": []
+      },
+      "sni_spoof_v2box": false,
+      "inbound_id": "default-tunnel",
+      "inbound_ids": [
+        "default-tunnel"
+      ],
+      "path": "/ws/df1bd011-d8b7-40da-89f6-c0d9d0c567e5",
+      "transport_type": "ws",
+      "telegram_secret": "",
+      "user_id": "5299ff19215a"
+    }
+  },
+  "subs": {},
+  "settings": {
+    "websocket_mode": true,
+    "xhttp_mode": true,
+    "default_connection_mode": "ws",
+    "max_ip_per_user": 3,
+    "bandwidth_limit_mbps": 100,
+    "live_monitoring": true,
+    "auto_ip_rotation": false,
+    "security_token": "jfE_q8ca761HtI1hG8sD1Q",
+    "bg_login": "",
+    "bg_dashboard": "",
+    "bg_sub": "",
+    "panel_audio": "",
+    "panel_audio_enabled": false,
+    "reality": {
+      "port": 1234,
+      "dest": "is1-ssl.mzstatic.com:443",
+      "sni": "is1-ssl.mzstatic.com",
+      "public_key": "",
+      "private_key": "",
+      "short_id": "5a3ff5a13d",
+      "spiderx": "/",
+      "fingerprint": "chrome",
+      "external_domain": "",
+      "external_port": 443
+    },
+    "xhttp": {
+      "path": "/",
+      "host": "",
+      "mode": "auto",
+      "xPaddingBytes": "100-1000",
+      "scMaxEachPostBytes": "1000000",
+      "scMaxBufferedPosts": 30,
+      "scStreamUpServerSecs": "20-80"
+    }
+  },
+  "groups": {},
+  "inbounds": {
+    "default": {
+      "name": "VLESS+WS پیش‌فرض",
+      "protocol": "vless",
+      "port": 443,
+      "network": "ws",
+      "security": "tls",
+      "domain": "localhost",
+      "external_domain": "localhost",
+      "sni": "localhost",
+      "external_port": 443,
+      "fingerprint": "chrome",
+      "reality_settings": {},
+      "xhttp_settings": {},
+      "created_at": "2026-08-23T15:24:47.807297",
+      "ws_settings": {
+        "path": "/ws"
+      }
+    },
+    "default-reality": {
+      "name": "Reality+XHTTP پیش‌فرض",
+      "protocol": "reality",
+      "port": 8443,
+      "network": "xhttp",
+      "security": "reality",
+      "domain": "",
+      "external_domain": "",
+      "sni": "is1-ssl.mzstatic.com",
+      "external_port": "",
+      "fingerprint": "chrome",
+      "reality_settings": {
+        "private_key": "aNltAupPveBNG1iHgfEF9x1L0piJwb2JUKO0nPjtkkQ",
+        "public_key": "scbHnDaYoQUaegFF42XxbPOkeMx1zTsghSoZIS6CQxg",
+        "short_id": "db0b13742e",
+        "spiderx": "/",
+        "dest": "is1-ssl.mzstatic.com:443",
+        "mldsa65_seed": "tVelg9Lu6SjC7zDb1bpbVJFzLtmP-jA64zOuqoalYXI",
+        "mldsa65_verify": "v5fv40kBclelt-bO946-Xx5Bb4B-cK-w88IdXziUsoYw2_ALdDmyXqPJVcZfxse8h6WCpXzxSL4A4x2qY1yLGgwHPGKlYJ06Yo27GwEYJy1H77VQA3I8w7gWhY6HIyuBnSoYVJL89OV6SwQC17Mk8Y079IKMlIa80YXHXag3VTXMFXqcX-zPepD7a8CjXW0dAEN0wiBHnaeIB1DkJBgeqmc6V8wbBtXtzU9m9FhKP6lh8xe0_ExjBHriQ1t3ENAPMPLXeYHgM5jxALLQdUBiYiS6EeaZFvIcC_Jhnol7JqQI5VeRUsKdoLbP8O2yd7u_xEVScTFsXWEEM4YzWYbRJHKdqvc3g5sfv5BmKrwTiYsGs8wK0htTxf1XHdW5d1HN0ch-8pqwq-mG29_kypHDCCx_pz5UroS0ACCd4sMh84XItilBEHsOoYYP47OS7ULdw3CEOHvOicd31RVYgViTy-xnpozfbs1XmT6bAXNwpnWOitpQ_4SilU3ym7PxG5MbXN1UOR_pa4E5EQ9z0ZacBnFUMB0iff_eoWxV7343pXLsJ2aYJz-26ev_iv_1gKDA1vZF7EL47Wmr9Tvyt9hMauFYg3qdNF6Kqy_HugJGbCaMOWo6-0vYyDAbcRlCS4Rtlx3tbjblRJYX-2m8wpLMPsZi0hoaM36qK6j41RjPhpoEEMakGOIM3uTv_JwadqudyaqgVsD4xnl12EWColO25zhI4BkwsJt1xuve5nzPaSpfKnYUwzu2xcFG708GWfwUjEmDuWMXDMPOVNu6_GXlJjEKq0Y2He3IufUL3CAUcPyuVcMTq1i6egZnlvLfzVL5e_gh3pFAj9eQzS9hjdu02ZahM4q1M5MHj-IkiQ0Ioe-7rp51F2V6l5v11B3kyyxMQeZsw9C6vn9UHFzSgJZvzkJyd5jm7NLqI_70Pb5vHtVN6rtjt7pDncuhcziEVdju-dYXfGo2e4O5ENycYxPFnxZrQU6IClAg2y8i6pIFp5_LN-jVhLI6Zrk_ktPArArnXHJSvireKDCLTE8ri6W-3XDj0ufftjqg1pUEhnJfyJkIA2RXUgeU44dfHa-YKwIgLwjEsIwbvCzTdMClopgfUwmdlaJZPlbvFcygG4U8Y3oMaPTqKi5r1r4xWpCWAbG2LWWXYO8H-4S72EInr98oZU_EMMBVz8qYf1cu5bFVc3cckPe86oUPli8C43e9dCHC-Tl03wyGxaYo88I7PbaJe4NYuGN6jUIIIBRNg6WjhJTfcmba2jVaO4v5cEUF5F_3S5kQ28VL_VKBpB8tso2ZqMIY60vtxvzNc3lA6-zIgcVJTNfYtkw7zk8Iuc-Hc-Y4rMIyy5lF1muQl3dkz94UwO75TBBYAnMBbvEmZ3paf5t_mBQ8sEQB5R8AZWYEif07AyFk3rjI10SLTifjm0Tvu9Aew_jqyYokDWJAEQlyRxvi13Nb8GcoUd5f-bvSH6hJ6fpJsB3oCUJLJB97uGt2VsoPR51SxQL7UprydAZMWczAcm22Qi3ORIeXXn1P5UQjMNsFkC_hvqTEqBMdPmBixooJAjDqfUpY-8QtElpWsGinEpooAQHMqyXfKCV0-ZnXZbMHkR2mPygOM9Hl9inrj9TolFpK4HZ-od1ikJEOPPH85CqRh7cyHiuvIJb9hPrbSoFF4OMvNB23u35tUdg_GWyVuExvTXxkRxDQ_PotOdh2mYW9RPXzoC7eAIWFPQ0HpRaUGFTrC7TbpNR9Sw5_lMkCwqJTE2Mj3qVQ8E3pPnMPVgusdjxtoeRNU33M6KR_ViUh3Ik3HydCE0AYt_T_PUnYXvFT8bYQqD15tKdOzzw1qLY_qd1X0sx7nwuWy6OpeytZUOEyA5nDXweW1bzEP-hbupFxaN7R4DtA-sJSpD8G-u8H2ERCHNhYGf_pXzyEZByNnlTQllLKz4Gzg-XD5y-0YcnVC_XNWJ1qarf4ZYNk3iL1cDXxcIXKwSvzrPwFLkC6us4a0vB4ySlh6ftSSjCbHEXW2PzVLSjhB-6tGGFPw0O7rWIHAFkXJlJ76_v068oCuXuOZ9w5eptdZ9qOtbc-uOIerGlR9J7oC0e41MVSB9FhUCFpezeAC86Qtf5fOPgourYA7qkBK6xUDjuE-FeB27Q0T48nroZrEUOyr7l5j5gUcP3HQQwpnEDpgunwpl8ey9JrtFCwlnDA1FUNV8JQ76WrxtrNqqjaW7MCFZF7_r-xMJV4OqusBGd_wQzy7mcThrP-gwv3Na9aBN7xQlmAPSMBQKHT-lsYCEt5-e8wlONEs_94t_8HowCFIcGBh5ThECiRN3DNq_pBHfVgEnEW-66wa0bFcdlsB6sf_kk2e0okRFibDFrVSSVdTsp6C-zO0tTOpa6BIE-AF5tZoT60TASX7MQ9zuMT-woobbNWfk7usbEoqzEtnIJhAjWrXGp2sR6n7devSzDuFg2o_7TyAOolsJMpmRN_b6KQq2F9XZLIVr8Hg2R7GTAWT5jiSlzV9GhahVlUskp93VqvrRi9qZKBAMr7sWLVL_j_7qpQ-tQQweunSemI9XpSTIdzu52_L1S7pW0hLu3p5hcisGLCZ671o_RS_fNOGf6slwk",
+        "sni": "is1-ssl.mzstatic.com"
+      },
+      "xhttp_settings": {
+        "path": "/",
+        "xPaddingBytes": "100-1000",
+        "mode": "stream-up",
+        "scMaxEachPostBytes": "1000000"
+      },
+      "created_at": "2026-08-23T15:24:47.818863"
+    },
+    "default-worker": {
+      "name": "Worker (Multi-Location)",
+      "protocol": "worker",
+      "port": 443,
+      "network": "ws",
+      "security": "tls",
+      "domain": "spider-27a71a.qabilsaibery.workers.dev",
+      "external_domain": "spider-27a71a.qabilsaibery.workers.dev",
+      "sni": "www.hcaptcha.com",
+      "spoof_ip": "8.6.112.4",
+      "external_port": 443,
+      "fingerprint": "chrome",
+      "reality_settings": {},
+      "xhttp_settings": {},
+      "ws_settings": {
+        "path": "/route/{uuid}"
+      },
+      "grpc_settings": {},
+      "created_at": "2026-08-23T18:26:12.538193"
+    },
+    "default-tunnel": {
+      "name": "Tunnel (Railway → CF Worker)",
+      "protocol": "tunnel",
+      "port": 8080,
+      "network": "ws",
+      "security": "tls",
+      "domain": "localhost",
+      "external_domain": "",
+      "sni": "",
+      "spoof_ip": "",
+      "external_port": 443,
+      "fingerprint": "chrome",
+      "reality_settings": {},
+      "xhttp_settings": {},
+      "ws_settings": {
+        "path": "/tunnel/{uuid}"
+      },
+      "grpc_settings": {},
+      "worker_domain": "spider-27a71a.qabilsaibery.workers.dev",
+      "created_at": "2026-08-23T18:26:39.098280",
+      "reverse_enabled": true
+    },
+    "default-node": {
+      "name": "NODE (Multi-Node Sync)",
+      "protocol": "node",
+      "port": 8080,
+      "network": "ws",
+      "security": "tls",
+      "domain": "localhost",
+      "external_domain": "",
+      "sni": "",
+      "external_port": 443,
+      "fingerprint": "chrome",
+      "reality_settings": {},
+      "xhttp_settings": {},
+      "ws_settings": {
+        "path": "/ws/{uuid}"
+      },
+      "grpc_settings": {},
+      "created_at": "2026-08-29T17:38:48.288473"
+    }
+  },
+  "ip_pool": [],
+  "ip_blacklist": [],
+  "worker": {
+    "connected": true,
+    "account_id": "e215c47c6affb5f87ceb8f1cd008d4c6",
+    "worker_name": "spider-27a71a",
+    "worker_domain": "spider-27a71a.qabilsaibery.workers.dev",
+    "worker_url": "https://spider-27a71a.qabilsaibery.workers.dev",
+    "token": "cfut_uWqLEnvkOBi8qPmtASv0nMAwXJ0vq8IwvGBkobIp30125d1c",
+    "control_token": "G4Z4MZTsqJQGne6B9gJZ4sPxehfWzPhv",
+    "panel_domain": "localhost",
+    "kv_namespace_id": "eefab90254fe491da1e71c4e45c83a98",
+    "kv_namespace_title": "spider-27a71a-db",
+    "remote_status": "online",
+    "last_heartbeat": "2026-08-23T18:45:12+03:30",
+    "worker_users_online": 0,
+    "worker_traffic_bytes": 0,
+    "worker_user_count": 0,
+    "proxies": {
+      "ad": {
+        "country": "Andorra",
+        "proxy": "91.187.93.166",
+        "port": 443,
+        "proxies": [
+          "91.187.93.166"
+        ]
+      },
+      "ae": {
+        "country": "United Arab Emirates",
+        "proxy": "176.97.66.175",
+        "port": 443,
+        "proxies": [
+          "176.97.66.175",
+          "90.156.221.54",
+          "3.29.240.49"
+        ]
+      },
+      "am": {
+        "country": "Armenia",
+        "proxy": "2.56.204.183",
+        "port": 443,
+        "proxies": [
+          "2.56.204.183",
+          "139.45.214.126",
+          "2.56.204.246"
+        ]
+      },
+      "at": {
+        "country": "Austria",
+        "proxy": "151.236.8.190",
+        "port": 443,
+        "proxies": [
+          "151.236.8.190"
+        ]
+      },
+      "au": {
+        "country": "Australia",
+        "proxy": "207.211.146.175",
+        "port": 443,
+        "proxies": [
+          "207.211.146.175",
+          "207.211.157.214",
+          "207.211.148.122"
+        ]
+      },
+      "ba": {
+        "country": "Bosnia & Herzegovina",
+        "proxy": "185.99.2.175",
+        "port": 443,
+        "proxies": [
+          "185.99.2.175"
+        ]
+      },
+      "bd": {
+        "country": "Bangladesh",
+        "proxy": "103.159.170.124",
+        "port": 443,
+        "proxies": [
+          "103.159.170.124",
+          "103.115.253.253",
+          "103.48.16.37"
+        ]
+      },
+      "be": {
+        "country": "Belgium",
+        "proxy": "148.177.146.71",
+        "port": 443,
+        "proxies": [
+          "148.177.146.71",
+          "35.241.172.224",
+          "35.210.99.51"
+        ]
+      },
+      "bg": {
+        "country": "Bulgaria",
+        "proxy": "78.128.127.93",
+        "port": 443,
+        "proxies": [
+          "78.128.127.93",
+          "185.205.210.83",
+          "91.215.154.48"
+        ]
+      },
+      "br": {
+        "country": "Brazil",
+        "proxy": "64.181.188.99",
+        "port": 443,
+        "proxies": [
+          "64.181.188.99",
+          "157.151.4.93",
+          "150.230.78.183"
+        ]
+      },
+      "ca": {
+        "country": "Canada",
+        "proxy": "172.98.207.58",
+        "port": 443,
+        "proxies": [
+          "172.98.207.58",
+          "148.116.81.218",
+          "151.145.42.203"
+        ]
+      },
+      "ch": {
+        "country": "Switzerland",
+        "proxy": "84.234.17.132",
+        "port": 443,
+        "proxies": [
+          "84.234.17.132",
+          "185.218.204.205",
+          "91.245.225.69"
+        ]
+      },
+      "cl": {
+        "country": "Chile",
+        "proxy": "186.67.70.55",
+        "port": 443,
+        "proxies": [
+          "186.67.70.55",
+          "129.151.113.165"
+        ]
+      },
+      "cn": {
+        "country": "China",
+        "proxy": "39.98.224.123",
+        "port": 443,
+        "proxies": [
+          "39.98.224.123"
+        ]
+      },
+      "co": {
+        "country": "Colombia",
+        "proxy": "157.137.229.226",
+        "port": 443,
+        "proxies": [
+          "157.137.229.226"
+        ]
+      },
+      "cy": {
+        "country": "Cyprus",
+        "proxy": "213.7.187.34",
+        "port": 443,
+        "proxies": [
+          "213.7.187.34"
+        ]
+      },
+      "cz": {
+        "country": "Czech Republic",
+        "proxy": "45.151.183.22",
+        "port": 443,
+        "proxies": [
+          "45.151.183.22",
+          "178.208.91.177",
+          "87.236.146.76"
+        ]
+      },
+      "de": {
+        "country": "Germany",
+        "proxy": "43.131.1.244",
+        "port": 443,
+        "proxies": [
+          "43.131.1.244",
+          "178.17.48.78",
+          "206.251.50.222"
+        ]
+      },
+      "dk": {
+        "country": "Denmark",
+        "proxy": "193.180.211.40",
+        "port": 443,
+        "proxies": [
+          "193.180.211.40",
+          "193.180.208.234"
+        ]
+      },
+      "do": {
+        "country": "Dominican Republic",
+        "proxy": "181.36.229.212",
+        "port": 443,
+        "proxies": [
+          "181.36.229.212"
+        ]
+      },
+      "ee": {
+        "country": "Estonia",
+        "proxy": "38.180.216.120",
+        "port": 443,
+        "proxies": [
+          "38.180.216.120",
+          "46.22.211.46",
+          "5.101.180.145"
+        ]
+      },
+      "eg": {
+        "country": "Egypt",
+        "proxy": "38.54.59.70",
+        "port": 443,
+        "proxies": [
+          "38.54.59.70"
+        ]
+      },
+      "es": {
+        "country": "Spain",
+        "proxy": "93.93.119.91",
+        "port": 443,
+        "proxies": [
+          "93.93.119.91",
+          "141.253.194.63",
+          "34.175.202.195"
+        ]
+      },
+      "fi": {
+        "country": "Finland",
+        "proxy": "45.80.229.176",
+        "port": 443,
+        "proxies": [
+          "45.80.229.176",
+          "185.212.149.7",
+          "2.26.23.174"
+        ]
+      },
+      "fr": {
+        "country": "France",
+        "proxy": "147.90.26.67",
+        "port": 443,
+        "proxies": [
+          "147.90.26.67",
+          "147.90.26.49",
+          "147.90.26.94"
+        ]
+      },
+      "gb": {
+        "country": "United Kingdom",
+        "proxy": "78.129.253.115",
+        "port": 443,
+        "proxies": [
+          "78.129.253.115",
+          "140.235.74.26",
+          "91.227.62.50"
+        ]
+      },
+      "hk": {
+        "country": "Hong Kong",
+        "proxy": "103.193.172.164",
+        "port": 443,
+        "proxies": [
+          "103.193.172.164",
+          "138.124.111.115",
+          "122.10.119.252"
+        ]
+      },
+      "hu": {
+        "country": "Hungary",
+        "proxy": "185.225.68.232",
+        "port": 443,
+        "proxies": [
+          "185.225.68.232",
+          "109.122.217.24",
+          "38.180.108.148"
+        ]
+      },
+      "id": {
+        "country": "Indonesia",
+        "proxy": "43.169.18.179",
+        "port": 443,
+        "proxies": [
+          "43.169.18.179",
+          "43.169.19.179"
+        ]
+      },
+      "ie": {
+        "country": "Ireland",
+        "proxy": "54.77.206.41",
+        "port": 443,
+        "proxies": [
+          "54.77.206.41",
+          "54.216.143.197",
+          "54.247.36.82"
+        ]
+      },
+      "il": {
+        "country": "Israel",
+        "proxy": "185.239.48.237",
+        "port": 443,
+        "proxies": [
+          "185.239.48.237",
+          "129.159.148.76"
+        ]
+      },
+      "in": {
+        "country": "India",
+        "proxy": "20.235.105.146",
+        "port": 443,
+        "proxies": [
+          "20.235.105.146",
+          "216.10.243.159",
+          "20.235.220.189"
+        ]
+      },
+      "is": {
+        "country": "Iceland",
+        "proxy": "195.246.230.125",
+        "port": 443,
+        "proxies": [
+          "195.246.230.125",
+          "89.147.108.252",
+          "194.247.183.118"
+        ]
+      },
+      "it": {
+        "country": "Italy",
+        "proxy": "5.249.148.85",
+        "port": 443,
+        "proxies": [
+          "5.249.148.85",
+          "80.211.238.61",
+          "195.231.38.220"
+        ]
+      },
+      "jp": {
+        "country": "Japan",
+        "proxy": "198.13.43.34",
+        "port": 443,
+        "proxies": [
+          "198.13.43.34",
+          "153.121.32.71",
+          "137.220.225.56"
+        ]
+      },
+      "kg": {
+        "country": "Kyrgyzstan",
+        "proxy": "188.240.213.125",
+        "port": 443,
+        "proxies": [
+          "188.240.213.125",
+          "188.240.213.40"
+        ]
+      },
+      "kr": {
+        "country": "South Korea",
+        "proxy": "45.93.31.34",
+        "port": 443,
+        "proxies": [
+          "45.93.31.34",
+          "158.180.77.154",
+          "141.164.37.50"
+        ]
+      },
+      "kz": {
+        "country": "Kazakhstan",
+        "proxy": "213.148.10.155",
+        "port": 443,
+        "proxies": [
+          "213.148.10.155",
+          "91.200.148.120",
+          "45.88.90.13"
+        ]
+      },
+      "lt": {
+        "country": "Lithuania",
+        "proxy": "5.199.162.130",
+        "port": 443,
+        "proxies": [
+          "5.199.162.130",
+          "5.199.173.195",
+          "195.181.244.107"
+        ]
+      },
+      "lv": {
+        "country": "Latvia",
+        "proxy": "31.58.77.150",
+        "port": 443,
+        "proxies": [
+          "31.58.77.150",
+          "213.155.12.173",
+          "188.253.23.155"
+        ]
+      },
+      "md": {
+        "country": "Moldova",
+        "proxy": "5.181.158.96",
+        "port": 443,
+        "proxies": [
+          "5.181.158.96",
+          "194.102.104.18"
+        ]
+      },
+      "mu": {
+        "country": "Mauritius",
+        "proxy": "41.76.42.116",
+        "port": 443,
+        "proxies": [
+          "41.76.42.116",
+          "41.76.42.118"
+        ]
+      },
+      "mx": {
+        "country": "Mexico",
+        "proxy": "148.223.138.11",
+        "port": 443,
+        "proxies": [
+          "148.223.138.11"
+        ]
+      },
+      "my": {
+        "country": "Malaysia",
+        "proxy": "23.27.200.223",
+        "port": 443,
+        "proxies": [
+          "23.27.200.223",
+          "58.27.117.24"
+        ]
+      },
+      "nl": {
+        "country": "Netherlands",
+        "proxy": "46.17.102.250",
+        "port": 443,
+        "proxies": [
+          "46.17.102.250",
+          "23.168.72.250",
+          "2.26.83.250"
+        ]
+      },
+      "ph": {
+        "country": "Philippines",
+        "proxy": "61.245.10.8",
+        "port": 443,
+        "proxies": [
+          "61.245.10.8",
+          "38.54.81.111",
+          "122.2.198.74"
+        ]
+      },
+      "pl": {
+        "country": "Poland",
+        "proxy": "139.28.97.231",
+        "port": 443,
+        "proxies": [
+          "139.28.97.231",
+          "212.119.43.76",
+          "91.108.237.23"
+        ]
+      },
+      "ro": {
+        "country": "Romania",
+        "proxy": "185.104.181.228",
+        "port": 443,
+        "proxies": [
+          "185.104.181.228",
+          "85.90.196.11",
+          "196.245.161.74"
+        ]
+      },
+      "rs": {
+        "country": "Serbia",
+        "proxy": "38.180.100.80",
+        "port": 443,
+        "proxies": [
+          "38.180.100.80"
+        ]
+      },
+      "ru": {
+        "country": "Russia",
+        "proxy": "91.107.64.160",
+        "port": 443,
+        "proxies": [
+          "91.107.64.160",
+          "45.153.71.149",
+          "31.76.230.241"
+        ]
+      },
+      "sa": {
+        "country": "Saudi Arabia",
+        "proxy": "80.225.64.251",
+        "port": 443,
+        "proxies": [
+          "80.225.64.251",
+          "158.101.242.224"
+        ]
+      },
+      "se": {
+        "country": "Sweden",
+        "proxy": "89.127.201.202",
+        "port": 443,
+        "proxies": [
+          "89.127.201.202",
+          "142.111.244.5",
+          "62.60.250.39"
+        ]
+      },
+      "sg": {
+        "country": "Singapore",
+        "proxy": "164.52.2.100",
+        "port": 443,
+        "proxies": [
+          "164.52.2.100",
+          "164.52.2.98",
+          "43.156.116.194"
+        ]
+      },
+      "sy": {
+        "country": "Syria",
+        "proxy": "185.235.16.12",
+        "port": 443,
+        "proxies": [
+          "185.235.16.12"
+        ]
+      },
+      "th": {
+        "country": "Thailand",
+        "proxy": "43.133.110.81",
+        "port": 443,
+        "proxies": [
+          "43.133.110.81"
+        ]
+      },
+      "tr": {
+        "country": "Turkey",
+        "proxy": "77.92.145.164",
+        "port": 443,
+        "proxies": [
+          "77.92.145.164",
+          "138.124.107.35",
+          "185.219.132.27"
+        ]
+      },
+      "tw": {
+        "country": "Taiwan",
+        "proxy": "60.249.21.30",
+        "port": 443,
+        "proxies": [
+          "60.249.21.30"
+        ]
+      },
+      "ua": {
+        "country": "Ukraine",
+        "proxy": "91.218.212.223",
+        "port": 443,
+        "proxies": [
+          "91.218.212.223",
+          "31.222.235.81",
+          "31.41.221.121"
+        ]
+      },
+      "us": {
+        "country": "United States",
+        "proxy": "147.75.230.33",
+        "port": 443,
+        "proxies": [
+          "147.75.230.33",
+          "147.75.230.207",
+          "147.75.230.160"
+        ]
+      },
+      "uz": {
+        "country": "Uzbekistan",
+        "proxy": "82.148.2.86",
+        "port": 443,
+        "proxies": [
+          "82.148.2.86"
+        ]
+      },
+      "vn": {
+        "country": "Vietnam",
+        "proxy": "103.6.234.246",
+        "port": 443,
+        "proxies": [
+          "103.6.234.246"
+        ]
+      },
+      "za": {
+        "country": "South Africa",
+        "proxy": "102.210.243.7",
+        "port": 443,
+        "proxies": [
+          "102.210.243.7",
+          "84.8.137.211",
+          "84.8.142.203"
+        ]
+      }
+    },
+    "last_sync": "2026-08-23T18:46:49+03:30",
+    "last_error": "",
+    "source_url": "https://raw.githubusercontent.com/NiREvil/vless/main/sub/ProxyIP-Daily.md",
+    "auto_sync": true,
+    "sync_error": "",
+    "sync_count": 32,
+    "tunnel_kv_namespace_id": "f1e6c98da53e4e80ad9907aef5931bef",
+    "tunnel_kv_namespace_title": "spider-27a71a-db-tunnel",
+    "tunnel_enabled": true,
+    "tunnel_created_at": "2026-08-23T18:26:31+03:30",
+    "tunnel_logs": [
+      {
+        "msg": "Tunnel KV ساخته شد: spider-27a71a-db-tunnel",
+        "time": "2026-08-23T18:26:31+03:30"
+      },
+      {
+        "msg": "Worker با binding جدید deploy شد",
+        "time": "2026-08-23T18:26:39+03:30"
+      },
+      {
+        "msg": "اینباند Tunnel روی localhost با مسیر /tunnel/{uuid} ساخته شد",
+        "time": "2026-08-23T18:26:39+03:30"
+      },
+      {
+        "msg": "اینباند Tunnel به‌صورت خودکار برای Reverse ساخته شد",
+        "time": "2026-08-23T18:26:39+03:30"
+      },
+      {
+        "msg": "Reverse KV آماده شد: spider-27a71a-db-reverse",
+        "time": "2026-08-23T18:26:39+03:30"
+      },
+      {
+        "msg": "Reverse فعال شد — دامنه spider-27a71a.qabilsaibery.workers.dev با مسیر /reverse/{uuid}",
+        "time": "2026-08-23T18:26:42+03:30"
+      },
+      {
+        "msg": "Worker با REVERSE_KV deploy شد",
+        "time": "2026-08-23T18:26:42+03:30"
+      }
+    ],
+    "reverse_kv_namespace_id": "2e70ae2fc6244dd99f362dbae985fb8f",
+    "reverse_kv_namespace_title": "spider-27a71a-db-reverse"
+  },
+  "server_info": {
+    "public_ip": "",
+    "country": "",
+    "country_code": "",
+    "country_flag": "",
+    "detected_at": ""
+  },
+  "panel_api_key": "spdr_2-4-3i65-4nMA0Yc4i_igzLSBWPv3G2YNwgNCwB4y2g",
+  "nodes": {},
+  "bot_config": {
+    "bot_token": "",
+    "channel_id": "",
+    "promotion_channel": "",
+    "webhook_secret": "",
+    "interval_value": 15,
+    "interval_unit": "minutes",
+    "running": false,
+    "last_run": "",
+    "last_error": ""
+  },
+  "password_hash": "fcb3149c23e642e467520646d99c50a045d0a5908fda6468b74fab1e851a08fa",
+  "saved_secret": "spider-panel-secret-key-v2",
+  "saved_at": "2026-08-29T17:40:56.809046"
+}

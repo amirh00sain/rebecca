@@ -3,8 +3,6 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "/start.sh"
-restartPolicyType = "on_failure"
-restartPolicyMaxRetries = 5
-healthcheckPath = "/__rebecca_go/healthz"
-healthcheckTimeout = 10
+startCommand = "python -m uvicorn main:app --host 0.0.0.0 --port 8080"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
